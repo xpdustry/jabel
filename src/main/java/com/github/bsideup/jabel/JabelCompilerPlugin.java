@@ -9,11 +9,12 @@ import java.lang.reflect.*;
 public class JabelCompilerPlugin implements Plugin{
     static{
         try{
+            Field field = Source.Feature.class.getDeclaredField("minLevel");
             Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
             unsafeField.setAccessible(true);
             Unsafe unsafe = (Unsafe)unsafeField.get(null);
 
-            long fieldOffset = 20; //unsafe field offset of minLevel
+            long staticFieldOffset = unsafe.objectFieldOffset(field);
 
             String[] feats = {
             "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
@@ -24,7 +25,9 @@ public class JabelCompilerPlugin implements Plugin{
 
             for(String name : feats){
                 try{
-                    unsafe.putObject(Source.Feature.valueOf(name), fieldOffset, Source.JDK8);
+                    Source.Feature feat = Source.Feature.valueOf(name);
+
+                    unsafe.putObject(feat, staticFieldOffset, Source.JDK8);
                 }catch(IllegalArgumentException e){
                     System.err.println("Unknown feature: " + e.getMessage());
                 }
