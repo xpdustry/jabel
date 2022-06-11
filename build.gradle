@@ -11,33 +11,10 @@ repositories{
     mavenCentral()
 }
 
-dependencies{
-    //implementation 'net.bytebuddy:byte-buddy:1.12.7'
-    //implementation 'net.bytebuddy:byte-buddy-agent:1.12.7'
-    //implementation 'net.java.dev.jna:jna:5.10.0'
-}
-
-
-task sourcesJar(type: Jar){
-    classifier 'sources'
-    from sourceSets.main.allJava
-}
-
-javadoc{
-    options.source = "8"
-}
-
-task javadocJar(type: Jar){
-    from javadoc
-    classifier = 'javadoc'
-}
-
 publishing{
     publications{
         mavenJava(MavenPublication){ publication ->
             from components.java
-            artifact sourcesJar
-            artifact javadocJar
         }
     }
 }

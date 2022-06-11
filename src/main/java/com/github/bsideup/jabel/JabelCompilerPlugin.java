@@ -26,9 +26,7 @@ public class JabelCompilerPlugin implements Plugin{
 
             for(String name : feats){
                 try{
-                    Source.Feature feat = Source.Feature.valueOf(name);
-
-                    unsafe.putObject(feat, fieldOffset, Source.JDK8);
+                    unsafe.putObject(Source.Feature.valueOf(name), fieldOffset, Source.JDK8);
                 }catch(IllegalArgumentException e){
                     System.err.println("Unknown feature: " + e.getMessage());
                 }
