@@ -2,19 +2,20 @@ package com.github.bsideup.jabel;
 
 import com.sun.source.util.*;
 import com.sun.tools.javac.code.*;
+import sun.misc.*;
 
-import java.lang.invoke.*;
-import java.lang.invoke.MethodHandles.*;
 import java.lang.reflect.*;
 
 public class JabelCompilerPlugin implements Plugin{
     static{
         try{
-            Field field = Lookup.class.getDeclaredField("IMPL_LOOKUP");
-            field.setAccessible(true);
+            Field field = Source.Feature.class.getDeclaredField("minLevel");
 
-            Lookup lookup = (Lookup)field.get(null);
-            MethodHandle set = lookup.findSetter(Source.Feature.class, "minLevel", Source.class);
+            Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
+            unsafeField.setAccessible(true);
+            Unsafe unsafe = (Unsafe)unsafeField.get(null);
+
+            long fieldOffset = unsafe.objectFieldOffset(field);
 
             String[] feats = {
             "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
@@ -26,13 +27,14 @@ public class JabelCompilerPlugin implements Plugin{
             for(String name : feats){
                 try{
                     Source.Feature feat = Source.Feature.valueOf(name);
-                    set.invokeExact(feat, Source.JDK8);
+
+                    unsafe.putObject(feat, fieldOffset, Source.JDK8);
                 }catch(IllegalArgumentException e){
                     System.err.println("Unknown feature: " + e.getMessage());
                 }
             }
 
-        }catch(Throwable e){
+        }catch(Exception e){
             throw new RuntimeException(e);
         }
     }
