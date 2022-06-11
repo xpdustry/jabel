@@ -9,13 +9,11 @@ import java.lang.reflect.*;
 public class JabelCompilerPlugin implements Plugin{
     static{
         try{
-            Field field = Source.Feature.class.getDeclaredField("minLevel");
-
             Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
             unsafeField.setAccessible(true);
             Unsafe unsafe = (Unsafe)unsafeField.get(null);
 
-            long fieldOffset = unsafe.objectFieldOffset(field);
+            long fieldOffset = 20; //unsafe field offset of minLevel
 
             String[] feats = {
             "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
