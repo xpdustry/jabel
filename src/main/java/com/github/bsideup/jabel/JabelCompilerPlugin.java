@@ -1,7 +1,10 @@
 package com.github.bsideup.jabel;
 
 import com.sun.source.util.*;
+import com.sun.tools.javac.api.*;
 import com.sun.tools.javac.code.*;
+import com.sun.tools.javac.util.*;
+
 import sun.misc.*;
 
 import java.lang.reflect.*;
@@ -17,10 +20,10 @@ public class JabelCompilerPlugin implements Plugin{
             long staticFieldOffset = unsafe.objectFieldOffset(field);
 
             String[] feats = {
-            "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
-            "LOCAL_VARIABLE_TYPE_INFERENCE", "VAR_SYNTAX_IMPLICIT_LAMBDAS", "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
-            "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES", "TEXT_BLOCKS", "PATTERN_MATCHING_IN_INSTANCEOF",
-            "REIFIABLE_TYPES_INSTANCEOF"
+                "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
+                "LOCAL_VARIABLE_TYPE_INFERENCE", "VAR_SYNTAX_IMPLICIT_LAMBDAS", "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
+                "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES", "TEXT_BLOCKS", "PATTERN_MATCHING_IN_INSTANCEOF",
+                "REIFIABLE_TYPES_INSTANCEOF", "RECORDS"
             };
 
             for(String name : feats){
@@ -40,7 +43,8 @@ public class JabelCompilerPlugin implements Plugin{
 
     @Override
     public void init(JavacTask task, String... args){
-
+        Context context = ((BasicJavacTask) task).getContext();
+        task.addTaskListener(new RecordsRetrofittingTaskListener(context));
     }
 
     @Override
