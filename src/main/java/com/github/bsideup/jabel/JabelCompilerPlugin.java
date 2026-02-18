@@ -9,6 +9,7 @@ import sun.misc.*;
 
 import java.lang.reflect.*;
 
+@SuppressWarnings("deprecation")
 public class JabelCompilerPlugin implements Plugin{
     static{
         try{
@@ -16,23 +17,61 @@ public class JabelCompilerPlugin implements Plugin{
             Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
             unsafeField.setAccessible(true);
             Unsafe unsafe = (Unsafe)unsafeField.get(null);
-
             long staticFieldOffset = unsafe.objectFieldOffset(field);
-
             String[] feats = {
-                "PRIVATE_SAFE_VARARGS", "SWITCH_EXPRESSION", "SWITCH_RULE", "SWITCH_MULTIPLE_CASE_LABELS",
-                "LOCAL_VARIABLE_TYPE_INFERENCE", "VAR_SYNTAX_IMPLICIT_LAMBDAS", "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
-                "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES", "TEXT_BLOCKS", "PATTERN_MATCHING_IN_INSTANCEOF",
-                "REIFIABLE_TYPES_INSTANCEOF", "RECORDS"
+                // Java 9
+                "PRIVATE_SAFE_VARARGS",
+                "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
+                "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES",
+                "PRIVATE_INTERFACE_METHODS",
+                //"MODULES",               // Impossible: cannot make a module-info.java in Java 8
+                // Java 10
+                "LOCAL_VARIABLE_TYPE_INFERENCE",
+                // Java 11
+                "VAR_SYNTAX_IMPLICIT_LAMBDAS",
+                // Java 14
+                "SWITCH_MULTIPLE_CASE_LABELS",
+                "SWITCH_RULE",
+                "SWITCH_EXPRESSION",
+                "NO_TARGET_ANNOTATION_APPLICABILITY",
+                // Java 15
+                "TEXT_BLOCKS",
+                // Java 16
+                "PATTERN_MATCHING_IN_INSTANCEOF",
+                "REIFIABLE_TYPES_INSTANCEOF",
+                "RECORDS",
+                // Java 17
+                "SEALED_CLASSES",
+                "REDUNDANT_STRICTFP",
+                // Java 19
+                "PRIVATE_MEMBERS_IN_PERMITS_CLAUSE", //appeared in Java24+
+                // Java 21
+                "CASE_NULL",
+                "PATTERN_SWITCH",
+                "UNCONDITIONAL_PATTERN_IN_INSTANCEOF",
+                "RECORD_PATTERNS",
+                //"STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
+                //"WARN_ON_ILLEGAL_UTF8",  // Not relevant: was just a warning and removed since Java 21
+                // Java 22
+                "UNNAMED_VARIABLES",
+                // Java 23
+                "PRIMITIVE_PATTERNS",
+                // Java 24
+                "ERASE_POLY_SIG_RETURN_TYPE", // Affects bytecode for @PolymorphicSignature methods (MethodHandle, VarHandle)
+                // Java 25
+                //"FLEXIBLE_CONSTRUCTORS", // Not relevant: very hard to implement
+                "IMPLICIT_CLASSES",
+                //"MODULE_IMPORTS",        // Impossible: needs the modules system
+                //"JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
             };
 
             for(String name : feats){
                 try{
                     Source.Feature feat = Source.Feature.valueOf(name);
-
                     unsafe.putObject(feat, staticFieldOffset, Source.JDK8);
                 }catch(IllegalArgumentException e){
-                    System.err.println("Unknown feature: " + e.getMessage());
+                    String msg = e.getMessage() == null ? name : e.getMessage().replace("No enum constant ", "");
+                    System.err.println("WARNING: Unknown feature: " + msg);
                 }
             }
 
@@ -43,8 +82,10 @@ public class JabelCompilerPlugin implements Plugin{
 
     @Override
     public void init(JavacTask task, String... args){
-        Context context = ((BasicJavacTask) task).getContext();
+        Context context = ((BasicJavacTask)task).getContext();
+        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
+        task.addTaskListener(new SwitchRetrofittingTaskListener(context));
     }
 
     @Override
