@@ -61,7 +61,7 @@ public class Main {
         System.out.println("case null: " + java21.caseNull(null));
         System.out.println("pattern switch: " + java21.patternSwitch("test"));
         System.out.println("record pattern: " + java21.recordPatternSwitch(new Java21FeaturesExample.Point(5, 7)));
-/*
+
         // Java 22
         System.out.println("\n--- Java 22 Features ---");
         var java22 = new Java22FeaturesExample();
@@ -72,7 +72,7 @@ public class Main {
         System.out.println("\n--- Java 23 Features (manual desugar) ---");
         var java23 = new Java23FeaturesExample();
         System.out.println("Primitive pattern: " + java23.primitivePatternSwitch(42));
-
+/*
         // Java 25 (manual desugar)
         System.out.println("\n--- Java 25 Features (manual desugar) ---");
         var validated = new Java25FeaturesExample.ValidatedChild(10);

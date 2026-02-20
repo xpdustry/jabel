@@ -43,4 +43,19 @@ public class Java23FeaturesExample {
             default -> "not an int";
         };
     }
+
+    String primitivePatternInstanceof(Object obj) {
+        String var;
+        if (obj instanceof int i && i < 0) {
+            var = "negative";
+        } else if (obj instanceof int i && i == 0) {
+            var = "zero";
+        } else if (obj instanceof int i) {
+            var = "positive";
+        } else {
+            var = "not an int";
+        }
+        var.toString(); // fake a use to avoid optimization
+        return var;
+    }
 }

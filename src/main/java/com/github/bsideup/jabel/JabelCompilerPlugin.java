@@ -9,7 +9,7 @@ import sun.misc.*;
 
 import java.lang.reflect.*;
 
-@SuppressWarnings("deprecation")
+@SuppressWarnings({"deprecation", "removal"})
 public class JabelCompilerPlugin implements Plugin{
     static{
         try{
@@ -55,9 +55,9 @@ public class JabelCompilerPlugin implements Plugin{
                 // Java 22
                 "UNNAMED_VARIABLES",
                 // Java 23
-                "PRIMITIVE_PATTERNS",
+                "PRIMITIVE_PATTERNS",      // TODO: still a preview but i keep it
                 // Java 24
-                "ERASE_POLY_SIG_RETURN_TYPE", // Affects bytecode for @PolymorphicSignature methods (MethodHandle, VarHandle)
+                "ERASE_POLY_SIG_RETURN_TYPE",
                 // Java 25
                 //"FLEXIBLE_CONSTRUCTORS", // Not relevant: very hard to implement
                 "IMPLICIT_CLASSES",

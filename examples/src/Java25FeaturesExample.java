@@ -25,22 +25,6 @@
  *     }
  * }
  * </pre>
- * <p>
- * <strong>IMPLICIT_CLASSES</strong>
- * <pre>
- * // Source (Java 25+):
- * // File: Main.java (no class declaration)
- * void main() {
- *     System.out.println("Hello");
- * }
- *
- * // Decompiled (Java 8):
- * public class Main {
- *     public static void main(String[] args) {
- *         System.out.println("Hello");
- *     }
- * }
- * </pre>
  */
 public class Java25FeaturesExample {
 
@@ -77,8 +61,4 @@ public class Java25FeaturesExample {
             this.description = desc;
         }
     }
-}
-
-void main() {
-
 }

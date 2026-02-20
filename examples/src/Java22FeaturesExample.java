@@ -1,5 +1,6 @@
 // Examples made by Claude Opus 4.5
 
+import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -21,7 +22,7 @@ import java.util.List;
 public class Java22FeaturesExample {
 
     void unnamedInForEach() {
-        var list = List.of("a", "b", "c");
+        var list = Arrays.asList("a", "b", "c");
         int count = 0;
 
         for (var _ : list) {
@@ -38,7 +39,7 @@ public class Java22FeaturesExample {
     }
 
     void unnamedInLambda() {
-        var list = List.of("a", "b", "c");
+        var list = Arrays.asList("a", "b", "c");
         var count = new int[]{0};
         list.forEach(_ -> count[0]++);
     }

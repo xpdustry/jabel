@@ -23,8 +23,8 @@ sourceSets.main.java.srcDirs = ["src"]
 sourceSets.main.java.exclude(
     //'Java17FeaturesExample.java',
     //'Java21FeaturesExample.java',
-    'Java22FeaturesExample.java',
-    'Java23FeaturesExample.java',
+    //'Java22FeaturesExample.java',
+    //'Java23FeaturesExample.java',
     'Java25FeaturesExample.java'
 )
 
