@@ -83,6 +83,7 @@ public class JabelCompilerPlugin implements Plugin{
     @Override
     public void init(JavacTask task, String... args){
         Context context = ((BasicJavacTask)task).getContext();
+        task.addTaskListener(new PreviewImportCleanupTaskListener(context));
         task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
