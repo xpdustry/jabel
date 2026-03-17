@@ -17,10 +17,13 @@ import java.lang.reflect.*;
  * the Java 8 bootclasspath does not contain {@code StringTemplate}, this auto-import causes
  * a compilation error whenever {@code --enable-preview} is combined with a Java 8 target.
  * <p>
- * The fix temporarily clears the {@code Preview.enabled} flag during the ENTER phase for
- * each compilation unit so that {@code TypeEnter.staticImports()} skips the injection.
- * The flag is restored to its original value immediately after ENTER completes, so all
- * other preview-feature checks remain unaffected.
+ * The fix works by temporarily replacing {@code TypeEnter}'s own {@code preview} field with
+ * an uninitialized {@code Preview} stub (created via {@code Unsafe.allocateInstance}) whose
+ * {@code enabled} flag is {@code false}.  Because the only use of {@code preview} inside
+ * {@code TypeEnter} is the single {@code isEnabled()} guard in {@code staticImports()}, the
+ * injection is skipped without touching the shared {@code Preview.instance(context)} singleton
+ * that all other compiler components use.  The original field value is restored immediately
+ * after the ENTER phase for each compilation unit completes.
  * <p>
  * This listener is a no-op on JDK versions that do not have a {@code STRING_TEMPLATES}
  * feature constant (i.e. JDK&nbsp;&lt;&nbsp;21 and JDK&nbsp;&ge;&nbsp;23).
@@ -40,49 +43,65 @@ class PreviewImportCleanupTaskListener implements TaskListener{
         }
     }
 
-    /** The {@code Preview} instance for this compilation, or {@code null} if not applicable. */
-    private final Object preview;
+    /**
+     * The {@code TypeEnter} singleton for this compilation, or {@code null} if not applicable.
+     * We swap its {@code preview} field temporarily during ENTER to block the injection.
+     */
+    private final Object typeEnterInstance;
 
-    /** Unsafe offset of {@code Preview.enabled}, or {@code -1} if not applicable. */
-    private final long enabledOffset;
+    /** Unsafe offset of {@code TypeEnter.preview}, or {@code -1} if not applicable. */
+    private final long typeEnterPreviewOffset;
 
-    /** Captured value of {@code Preview.enabled} before we clear it for each ENTER event. */
-    private boolean originalEnabled;
+    /** The real {@code Preview} object that lives in {@code TypeEnter.preview}. */
+    private final Object originalPreview;
+
+    /**
+     * An uninitialized {@code Preview} instance (all fields zero/false/null) used as the
+     * temporary replacement.  Its {@code enabled} field is {@code false}, so
+     * {@code TypeEnter.staticImports()} sees {@code preview.isEnabled() == false} and skips
+     * the {@code StringTemplate.STR} injection entirely.
+     */
+    private final Object disabledPreview;
 
     PreviewImportCleanupTaskListener(Context context){
-        Object previewInstance = null;
-        long offset = -1;
+        Object typeEnterInst = null;
+        long previewOffset = -1;
+        Object origPreview = null;
+        Object disabledPrev = null;
         try{
             // STRING_TEMPLATES was introduced in JDK 21 and removed in JDK 23.
             // Using reflection so the class compiles on any JDK version.
             Class<?> featureClass = Class.forName("com.sun.tools.javac.code.Source$Feature");
             featureClass.getField("STRING_TEMPLATES"); // throws NoSuchFieldException on other JDKs
 
+            // Obtain the TypeEnter singleton and locate its `preview` field.
+            Class<?> typeEnterClass = Class.forName("com.sun.tools.javac.comp.TypeEnter");
+            typeEnterInst = typeEnterClass.getMethod("instance", Context.class).invoke(null, context);
+            Field previewField = typeEnterClass.getDeclaredField("preview");
+            previewOffset = UNSAFE.objectFieldOffset(previewField);
+            origPreview = UNSAFE.getObject(typeEnterInst, previewOffset);
+
+            // Build a zero-initialised Preview stub: isEnabled() returns false (boolean default).
             Class<?> previewClass = Class.forName("com.sun.tools.javac.code.Preview");
-            previewInstance = previewClass.getMethod("instance", Context.class).invoke(null, context);
-            Field enabledField = previewClass.getDeclaredField("enabled");
-            offset = UNSAFE.objectFieldOffset(enabledField);
+            disabledPrev = UNSAFE.allocateInstance(previewClass);
         }catch(Exception ignored){
             // Not JDK 21-22 or reflection unavailable — no action required.
         }
-        this.preview = previewInstance;
-        this.enabledOffset = offset;
+        this.typeEnterInstance = typeEnterInst;
+        this.typeEnterPreviewOffset = previewOffset;
+        this.originalPreview = origPreview;
+        this.disabledPreview = disabledPrev;
     }
 
     @Override
     public void started(TaskEvent e){
-        if(preview == null || e.getKind() != TaskEvent.Kind.ENTER) return;
-        originalEnabled = UNSAFE.getBoolean(preview, enabledOffset);
-        if(originalEnabled){
-            UNSAFE.putBoolean(preview, enabledOffset, false);
-        }
+        if(typeEnterInstance == null || e.getKind() != TaskEvent.Kind.ENTER) return;
+        UNSAFE.putObject(typeEnterInstance, typeEnterPreviewOffset, disabledPreview);
     }
 
     @Override
     public void finished(TaskEvent e){
-        if(preview == null || e.getKind() != TaskEvent.Kind.ENTER) return;
-        if(originalEnabled){
-            UNSAFE.putBoolean(preview, enabledOffset, true);
-        }
+        if(typeEnterInstance == null || e.getKind() != TaskEvent.Kind.ENTER) return;
+        UNSAFE.putObject(typeEnterInstance, typeEnterPreviewOffset, originalPreview);
     }
 }
