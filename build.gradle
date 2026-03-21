@@ -11,9 +11,6 @@ repositories{
     mavenCentral()
 }
 
-//TODO: compile jabel in java 8 with java 25 api
-
-
 // Publishing
 signing {
     def signingKey = findProperty("signingKey")

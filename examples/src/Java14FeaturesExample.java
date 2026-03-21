@@ -47,6 +47,14 @@ public class Java14FeaturesExample {
 
     enum Day { MON, TUE, WED, THU, FRI, SAT, SUN }
 
+    class Builder{
+        public int n;
+        public Builder build(Object o){
+            n++;
+            return this;
+        }
+    }
+
     String switchMultipleLabels(Day day) {
         return switch (day) {
             case SAT, SUN -> "weekend";
@@ -55,11 +63,11 @@ public class Java14FeaturesExample {
     }
 
     String switchRule(Day day) {
-        return switch (day) {
+        return (switch (day) {
             case MON -> "monday";
             case TUE -> "tuesday";
             default -> "other";
-        };
+        }).toLowerCase();
     }
 
     int switchExpressionWithYield(Day day) {
@@ -79,5 +87,35 @@ public class Java14FeaturesExample {
             case SUN -> System.out.println("Sunday");
             default -> System.out.println("Weekday");
         }
+    }
+
+    int[] asArrayElements(int a, int b) {
+        return new int[]{
+            switch (a) { case 1 -> 10; default -> 0; },
+            switch (b) { case 2 -> 20; default -> 0; }
+        };
+    }
+
+    String chained(String str) {
+        return switch (
+            switch (str) {
+                case "test": {
+                    str = "pok";
+                    yield "A";
+                }
+                default: yield "B";
+            }
+        ) {
+            case "A" -> str.isEmpty() ? "got-A" : "err";
+            default  -> "got-B";
+        };
+    }
+
+    int twiceOf(int n) {
+        return new Builder().build(1).build(switch (n) {
+            case 1  -> 10;
+            case 2  -> 20;
+            default -> n * n;
+        }).build(4).n;
     }
 }

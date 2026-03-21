@@ -11,19 +11,21 @@ import com.sun.tools.javac.util.*;
 import javax.lang.model.element.Modifier;
 
 import java.util.Iterator;
-import java.util.stream.Stream;
+import java.util.stream.*;
 
 
 class RecordsRetrofittingTaskListener implements TaskListener{
     final Context context;
     final TreeMaker make;
     final Symtab syms;
+    final Types types;
     final Names names;
 
     public RecordsRetrofittingTaskListener(Context context){
         this.context = context;
         make = TreeMaker.instance(context);
         syms = Symtab.instance(context);
+        types = Types.instance(context);
         names = Names.instance(context);
     }
 
@@ -49,6 +51,7 @@ class RecordsRetrofittingTaskListener implements TaskListener{
         }.scan(e.getCompilationUnit(), null);
     }
 
+    /** Remove RECORD flag to avoid invalid ASM reading */
     @Override
     public void finished(TaskEvent e){
         if(e.getKind() != TaskEvent.Kind.ANALYZE) return;
@@ -58,7 +61,6 @@ class RecordsRetrofittingTaskListener implements TaskListener{
                 if("RECORD".equals(node.getKind().toString())){
                     JCClassDecl classDecl = (JCClassDecl)node;
                     if(classDecl.sym != null){
-                        // Remove RECORD flag to avoid invalid ASM reading
                         classDecl.sym.flags_field &= ~Flags.RECORD;
                     }
                 }
@@ -309,7 +311,7 @@ class RecordsRetrofittingTaskListener implements TaskListener{
                                 make.Binary(Tag.NE, myFieldAccess, make.Literal(0f)),
                                 make.App(
                                     make.Select(
-                                        make.Ident(names.fromString("Float")),
+                                        make.QualIdent(types.boxedClass(syms.floatType)),
                                         names.fromString("floatToIntBits")).setType(syms.intType),
                                     List.of(myFieldAccess)
                                 ),
@@ -323,8 +325,8 @@ class RecordsRetrofittingTaskListener implements TaskListener{
                         expressions.append(
                             make.App(
                                 make.Select(
-                                    make.Ident(names.fromString("Double")),
-                                    names.fromString("hashCode")).setType(syms.intType),
+                                    make.QualIdent(types.boxedClass(syms.doubleType)),
+                                    names.hashCode).setType(syms.intType),
                                 List.of(myFieldAccess)
                             )
                         );
@@ -344,14 +346,8 @@ class RecordsRetrofittingTaskListener implements TaskListener{
                 expressions.append(
                     make.App(
                         make.Select(
-                            make.Select(
-                                make.Select(
-                                    make.Ident(names.fromString("java")),
-                                    names.fromString("util")
-                                ),
-                                names.fromString("Arrays")
-                            ),
-                            names.fromString("hashCode")
+                            make.QualIdent(syms.arraysType.tsym),
+                            names.hashCode
                         ).setType(syms.intType),
                         List.of(myFieldAccess)
                     )

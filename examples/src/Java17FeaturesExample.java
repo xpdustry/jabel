@@ -35,10 +35,14 @@ public class Java17FeaturesExample {
 
     final class Circle extends Shape {
         Circle() { super("Circle"); }
+        void test(){
+            Square.test();
+        }
     }
 
     final class Square extends Shape {
         Square() { super("Square"); }
+        static void test() {}
     }
 
     non-sealed class Rectangle extends Shape {

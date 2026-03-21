@@ -1,5 +1,3 @@
-// Examples made by Claude Opus 4.5
-
 /**
  * Examples of Java 25 features with manual desugaring: <br>
 
@@ -20,15 +18,28 @@
  * </pre>
  */
 
+int variable = 1;
 
-public static void main() {
+static void main() {
+    System.out/*IO*/.println("Implicit classes work!");
+}
 
+void main(String[] args) {
+    System.out/*IO*/.println("instance main with args.");
+    new Test();
 }
 
 private void privateMethod() {
-
+    main();
 }
+
 
 interface TestInterface {
 
+}
+
+class Test implements TestInterface {
+    public Test() {
+        Integer.toString(variable);
+    }
 }

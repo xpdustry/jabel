@@ -2,222 +2,264 @@ package com.github.bsideup.jabel;
 
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
+import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List;
 
+import java.lang.reflect.*;
 import java.util.*;
+
+import static com.github.bsideup.jabel.RecordPatternHelper.*;
 
 
 /**
- * Transforms modern switch constructs (Java 17+) into Java 8 compatible bytecode. <br>
- * Note that since compiler api may change between versions, the class automatically adapts his process.
+ * Transforms modern switch constructs (Java 17+) into Java 8 compatible code.
  * <p>
- * Handles:
- * <ul>
- * <li>Pattern matching in switch (case String s ->)</li>
- * <li>When guards (case String s when s.length() > 5 ->)</li>
- * <li>Case null (case null ->)</li>
- * <li>Record patterns (case Point(int x, int y) ->)</li>
- * <li>Switch expressions (var x = switch(...) { ... })</li>
- * </ul>
+ * This will extract {@code null} case to a {@code if(sel==null)} statement. <br>
+ * And will move (record) pattern/guard switch labels, to the switch condition.
+ * Letting the compiler optimize it.
  */
 public class SwitchRetrofittingTaskListener implements TaskListener{
     // region compiler compatibility
 
-    private static Boolean GUARD_PRESENT, LABELS_RESENT;
+    // Because we're compiling with Java25, the old method (without guards) doens't exists.
+    private static Method LEGACY_MAKE_CASE;
+    // Some internal states to avoid getting errors everytimes we trying to use a found feature.
+    private static Boolean GUARDS, LABELS, BODIES, DEFAULT_CASES, CONSTANT_CASES;
 
-    private static String getClassName(Object o){
-        return o.getClass().getSimpleName();
-    }
-
-    /** Get the guard expression from a case. (Java 21+) */
-    private static JCExpression getGuard(JCCase caseNode){
-        // Optimization in case the method is not present
-        if(GUARD_PRESENT != null){
-            return GUARD_PRESENT ? caseNode.getGuard() : null;
-        }
+    /** Get the guard expression from a case, or null if guards are unsupported. */
+    private static JCExpression getGuard(JCCase caseTree){
+        if(GUARDS != null) return GUARDS ? caseTree.getGuard() : null;
         try{
-            JCExpression exp = caseNode.getGuard();
-            GUARD_PRESENT = true;
-            return exp;
+            JCExpression guard = caseTree.getGuard();
+            GUARDS = true;
+            return guard;
         }catch(NoSuchMethodError ignored){
-            GUARD_PRESENT = false;
+            GUARDS = false;
             return null;
         }
     }
 
-    /** Get case labels. */
+    /** Get the labels from a case, handling both old and new compiler APIs. */
     @SuppressWarnings("unchecked")
-    private static List<JCTree> getCaseLabels(JCCase caseNode){
-        // Optimization in case the method is not present
-        if(LABELS_RESENT == null){
-            // Java 17+
+    private static List<JCTree> getLabels(JCCase caseTree){
+        if(LABELS == null){
             try{
-                List<JCCaseLabel> labels = caseNode.getLabels();
-                LABELS_RESENT = true;
-                return (List<JCTree>)(List<?>)labels; // I know what i'm doing
+                caseTree.getLabels();
+                LABELS = true;
             }catch(NoSuchMethodError ignored){
-                LABELS_RESENT = false;
+                LABELS = false;
             }
         }
-        // I know what i'm doing
-        if(LABELS_RESENT) return (List<JCTree>)(List<?>)caseNode.getLabels();
-        List<JCExpression> labels = caseNode.getExpressions();
+        if(LABELS) return (List<JCTree>)(List<?>)caseTree.getLabels();
+
+        List<JCExpression> labels = caseTree.getExpressions();
         if(labels == null) return List.nil();
         List<JCTree> result = List.nil();
         for(Object label : labels){
-            if(label instanceof JCTree) result = result.append((JCTree)label);
+            if(!(label instanceof JCTree)) continue;
+            result = result.append((JCTree)label);
         }
         return result;
     }
 
-    /** Get the body of an arrow case. (Java 14+) */
-    private static JCTree getArrowCaseBody(JCCase caseNode){
+    /** Get the arrow-style body of a case, or null if unsupported. */
+    private static JCTree getBody(JCCase caseTree){
+        if (BODIES != null) return BODIES ? caseTree.getBody() : null;
         try{
-            return caseNode.getBody();
-        }catch(NoSuchMethodError e){
+            JCTree body = caseTree.getBody();
+            BODIES = true;
+            return body;
+        }catch(NoSuchMethodError ignored){
+            BODIES = false;
             return null;
         }
     }
 
-    /** Check if tree is a JCSwitchExpression */
-    private static boolean isSwitchExpression(JCTree tree){
+    /**
+     * Create a new case tree, handling different JDK signatures. <br>
+     * JDK 21+: Case(CaseKind, List labels, JCExpression guard, List stats, JCTree body) <br>
+     * JDK 17-20: Case(CaseKind, List labels, List stats, JCTree body)
+     */
+    @SuppressWarnings("unchecked")
+    private JCCase makeCase(CaseTree.CaseKind kind, List<? extends JCTree> labels, JCExpression guard,
+                            List<JCStatement> stats, JCTree body){
+        if (GUARDS != false) {
+            try{
+                JCCase c = make.Case(kind, (List<JCCaseLabel>)(List<?>)labels, guard, stats, body);
+                GUARDS = true;
+                return c;
+            }catch(NoSuchMethodError ignored){}
+        }
+
+        try{
+            GUARDS = false;
+            if(LEGACY_MAKE_CASE == null){
+                LEGACY_MAKE_CASE = TreeMaker.class.getMethod("Case", CaseTree.CaseKind.class, List.class,
+                                                             List.class, JCTree.class);
+            }
+            return (JCCase)LEGACY_MAKE_CASE.invoke(make, kind, labels, stats, body);
+        }catch(Exception ignored){} // Hope this never happen...
+        return null;
+    }
+
+    //TODO
+    private static final Method MAKE_DEFAULT_CASE_LABEL;
+    static{
+        Method m = null;
+        try{ m = TreeMaker.class.getMethod("DefaultCaseLabel"); }
+        catch(NoSuchMethodException | NoSuchMethodError ignored){}
+        MAKE_DEFAULT_CASE_LABEL = m;
+    }
+
+    /** Creates a default case label, or null if unsupported. Uses reflection to avoid
+     * {@code JCDefaultCaseLabel}/{@code JCCaseLabel} references in the bytecode descriptor
+     * (those classes don't exist on JDK &lt; 17 and would cause {@code NoClassDefFoundError}
+     * at class-load time). */
+    private JCTree makeDefaultCaseLabel(){
+        if(MAKE_DEFAULT_CASE_LABEL == null) return null;
+        try{ return (JCTree)MAKE_DEFAULT_CASE_LABEL.invoke(make); }
+        catch(Exception ignored){ return null; }
+    }
+
+    /**
+     * Creates a case label for an int constant, handling JDK 17-20 vs 21+ APIs.
+     * <p>
+     * {@code TreeMaker.ConstantCaseLabel} is invoked via reflection because its return type
+     * {@code JCConstantCaseLabel} doesn't exist on JDK 17. A direct call would embed that
+     * class name in the bytecode descriptor, causing {@code NoClassDefFoundError} at
+     * class-load time before any runtime guard executes.
+     * Casts to {@code JCConstantCaseLabel} elsewhere (e.g. in {@code isNull}) are safe:
+     * {@code checkcast} is resolved lazily at method-invocation time, not at class load.
+     */
+    private static final Method MAKE_CONSTANT_CASE_LABEL;
+    static{
+        Method m = null;
+        try{ m = TreeMaker.class.getMethod("ConstantCaseLabel", JCExpression.class); }
+        catch(NoSuchMethodException | NoSuchMethodError ignored){}
+        MAKE_CONSTANT_CASE_LABEL = m;
+        CONSTANT_CASES = m != null;
+    }
+
+    private JCTree makeLabel(int i){
+        if(MAKE_CONSTANT_CASE_LABEL != null)
+            try{ return (JCTree)MAKE_CONSTANT_CASE_LABEL.invoke(make, make.Literal(i)); }
+            catch(Exception ignored){}
+        return make.Literal(i);
+    }
+/*
+    /** Create a default case label. Returns null if unsupported (JDK < 17). *\/
+    private JCTree makeDefaultCaseLabel(){
+        if (DEFAULT_CASES != null) return DEFAULT_CASES ? make.DefaultCaseLabel() : null;
+        try{
+            JCCaseLabel c = make.DefaultCaseLabel();
+            DEFAULT_CASES = true;
+            return c;
+        }catch(NoSuchMethodError ignored){
+            DEFAULT_CASES = false;
+            return null;
+        }
+    }
+
+    /** Creates a case label for an {@code Integer}, handling JDK 17-20 and 21+ APIs. *\/
+    private JCTree makeLabel(int i){
+        if (CONSTANT_CASES != null)
+            return CONSTANT_CASES ? make.ConstantCaseLabel(make.Literal(i)) : make.Literal(i);
+        try{
+            JCTree tree = make.ConstantCaseLabel(make.Literal(i)); // JDK 21+
+            CONSTANT_CASES = true;
+            return tree;
+        }catch(NoSuchMethodError ignored){
+            CONSTANT_CASES = false;
+            return make.Literal(i); // JDK 17-20
+        }
+    }
+*/
+
+    private static boolean isSwitchExpression(Tree tree){
         return tree != null && getClassName(tree).equals("JCSwitchExpression");
     }
 
-    /** Check if label is a pattern (JCBindingPattern, JCRecordPattern, etc.) */
-    private static boolean isPatternLabel(JCTree label){
-        if(label == null) return false;
-        String name = getClassName(label);
-        return name.contains("Pattern") || name.contains("Binding");
-    }
-
-    /** Check if label is the default case. */
-    private static boolean isDefaultLabel(JCTree label){
+    private static boolean isDefault(JCTree label){
         return label != null && getClassName(label).equals("JCDefaultCaseLabel");
     }
 
-    /** Check if label is constant. */
-    private static boolean isConstantLabel(JCTree label){
+    private static boolean isConstant(JCTree label){
         return label != null && getClassName(label).equals("JCConstantCaseLabel");
     }
 
-    /** Check if label is null literal */
-    private static boolean isNullLabel(JCTree label){
-        // Direct null literal
-        if(label instanceof JCLiteral){
-            return ((JCLiteral)label).typetag == TypeTag.BOT;
-        }
-        // JCConstantCaseLabel wrapping null
-        if(isConstantLabel(label)){
-            JCExpression expr = ((JCConstantCaseLabel)label).expr;
-            return expr instanceof JCLiteral && ((JCLiteral)expr).typetag == TypeTag.BOT;
+    private static boolean isNull(JCTree label){
+        if(label instanceof JCLiteral) return ((JCLiteral)label).typetag == TypeTag.BOT;
+        if(!isConstant(label)) return false;
+        JCExpression expr = ((JCConstantCaseLabel)label).expr;
+        return expr instanceof JCLiteral && ((JCLiteral)expr).typetag == TypeTag.BOT;
+    }
+
+    private static boolean hasDefault(JCCase caseTree){
+        List<JCTree> labels = getLabels(caseTree);
+        if(labels.isEmpty()) return true;
+        for(JCTree label : labels){
+            if(!isDefault(label)) continue;
+            return true;
         }
         return false;
     }
 
-    private static boolean containsDefaultLabel(JCCase caseNode) {
-        List<JCTree> labels = getCaseLabels(caseNode);
-        return labels.isEmpty() || labels.stream().anyMatch(SwitchRetrofittingTaskListener::isDefaultLabel);
-    }
-
-    /** Extract the binding variable from a pattern label */
-    private static JCVariableDecl getPatternVar(JCTree label){
-        if(label == null) return null;
-        switch(getClassName(label)){
-            case "JCBindingPattern":
-                return ((JCBindingPattern)label).var;
-            case "JCPatternCaseLabel":
-                return getPatternVar(((JCPatternCaseLabel)label).pat);
-            default:
-                return null;
-        }
-    }
-
-    /** Extract the type from a record pattern */
-    private static JCExpression getRecordPatternType(JCTree label){
-        if(label == null) return null;
-        switch(getClassName(label)){
-            case "JCRecordPattern":
-                return ((JCRecordPattern)label).deconstructor;
-            case "JCPatternCaseLabel":
-                return getRecordPatternType(((JCPatternCaseLabel)label).pat);
-            default:
-                return null;
-        }
-    }
-
-    /** Get nested patterns from a record pattern */
-    private static List<JCPattern> getRecordPatternNested(JCTree label){
-        if(label == null) return null;
-        switch(getClassName(label)){
-            case "JCRecordPattern":
-                return ((JCRecordPattern)label).nested;
-            case "JCPatternCaseLabel":
-                return getRecordPatternNested(((JCPatternCaseLabel)label).pat);
-            default:
-                return null;
-        }
-    }
-
-    /** Extract constant expression from a case label */
     private static JCExpression getLabelExpression(JCTree label){
         if(label instanceof JCExpression) return (JCExpression)label;
-        if(isConstantLabel(label)) return ((JCConstantCaseLabel)label).expr;
+        if(isConstant(label)) return ((JCConstantCaseLabel)label).expr;
         return null;
     }
 
-    /** Get selector from a switch expression */
-    private static JCExpression getSwitchExprSelector(JCTree switchExpr){
-        if(!isSwitchExpression(switchExpr)) return null;
-        return ((JCSwitchExpression)switchExpr).selector;
+    private static boolean hasPatterns(List<JCCase> cases){
+        if(cases == null) return false;
+        for(JCCase caseTree : cases){
+            if(caseTree == null) continue;
+            if(getGuard(caseTree) != null) return true;
+            for(JCTree label : getLabels(caseTree)){
+                if(!isPattern(label)) continue;
+                return true;
+            }
+        }
+        return false;
     }
 
-    /** Set selector on a switch expression */
-    private static void setSwitchExprSelector(JCTree switchExpr, JCExpression selector){
-        if(isSwitchExpression(switchExpr)) ((JCSwitchExpression)switchExpr).selector = selector;
-    }
-
-    /** Get cases from a switch expression */
-    private static List<JCCase> getSwitchExprCases(JCTree switchExpr){
-        if(!isSwitchExpression(switchExpr)) return null;
-        return ((JCSwitchExpression)switchExpr).cases;
-    }
-
-    /** Set cases on a switch expression */
-    private static void setSwitchExprCases(JCTree switchExpr, List<JCCase> cases){
-        if(isSwitchExpression(switchExpr)) ((JCSwitchExpression)switchExpr).cases = cases;
-    }
-
-    /** Get value from a JCYield statement */
-    private static JCExpression getYieldValue(JCStatement stmt){
-        if(!getClassName(stmt).equals("JCYield")) return null;
-        return ((JCYield)stmt).value;
+    private static boolean hasNull(List<JCCase> cases){
+        if(cases == null) return false;
+        for(JCCase caseTree : cases){
+            if(caseTree == null) continue;
+            for(JCTree label : getLabels(caseTree)){
+                if(!isNull(label)) continue;
+                return true;
+            }
+        }
+        return false;
     }
 
     // end region
     // region task listener
 
-    final Context context;
+    final RecordPatternHelper helper;
     final TreeMaker make;
+    final Symtab syms;
     final Names names;
     private int tempVarCounter = 0;
 
     public SwitchRetrofittingTaskListener(Context context){
-        this.context = context;
+        this.helper = new RecordPatternHelper(context);
         this.make = TreeMaker.instance(context);
+        this.syms = Symtab.instance(context);
         this.names = Names.instance(context);
     }
 
     @Override
     public void started(TaskEvent e){
         if(e.getKind() != TaskEvent.Kind.ENTER) return;
-        CompilationUnitTree cu = e.getCompilationUnit();
-        if(!(cu instanceof JCCompilationUnit)) return;
-        new SwitchTranslator().translate((JCCompilationUnit)cu);
+        if(!(e.getCompilationUnit() instanceof JCCompilationUnit)) return;
+        new SwitchTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
     }
 
     @Override
@@ -225,293 +267,386 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     }
 
-    // endregion
-    // region Tree Translator
 
-    class SwitchTranslator extends TreeTranslator{
-        @SuppressWarnings("unchecked")
-        @Override
-        public <T extends JCTree> T translate(T tree){
-            if(!isSwitchExpression(tree)) return super.translate(tree);
-            return (T)handleSwitchExpression(tree);
-        }
+    private class SwitchTranslator extends TreeTranslator{
+        private final Map<JCSwitchExpression, JCExpression> captures = new HashMap<>();
 
         @Override
         public void visitSwitch(JCSwitch tree){
             super.visitSwitch(tree);
-            if(needsTransformation(tree.cases)){
-                result = transformPatternSwitch(tree);
-            }
-        }
-
-        private JCTree handleSwitchExpression(JCTree switchExpr){
-            make.at(switchExpr.pos);
-            JCExpression selector = translate(getSwitchExprSelector(switchExpr));
-            List<JCCase> cases = translate(getSwitchExprCases(switchExpr));
-            if(needsTransformation(cases)) return buildTernaryChain(cases, selector);
-            setSwitchExprSelector(switchExpr, selector);
-            setSwitchExprCases(switchExpr, cases);
-            return switchExpr;
-        }
-
-        private boolean needsTransformation(List<JCCase> cases){
-            for(JCCase caseNode : cases){
-                if(getGuard(caseNode) != null) return true;
-                for(JCTree label : getCaseLabels(caseNode)){
-                    if(isPatternLabel(label) || isNullLabel(label)) return true;
-                }
-            }
-            return false;
-        }
-
-        // ========== Ternary chain conversion ==========
-
-        private JCExpression buildTernaryChain(List<JCCase> cases, JCExpression selector){
-            java.util.List<JCCase> nonDefaultCases = new ArrayList<>();
-            JCExpression defaultExpr = null;
-
-            for(JCCase caseNode : cases){
-                if(containsDefaultLabel(caseNode)) defaultExpr = extractCaseExpression(caseNode);
-                else nonDefaultCases.add(caseNode);
-            }
-
-            JCExpression result = defaultExpr != null ? defaultExpr : make.Literal(TypeTag.BOT, null);
-            for(int i = nonDefaultCases.size() - 1; i >= 0; i--){
-                JCCase caseNode = nonDefaultCases.get(i);
-                List<JCTree> labels = getCaseLabels(caseNode);
-
-                JCExpression condition = buildCondition(labels, selector, caseNode);
-                if(condition == null) continue;
-
-                JCExpression thenExpr = extractCaseExpression(caseNode);
-                if(thenExpr == null) thenExpr = make.Literal(TypeTag.BOT, null);
-
-                thenExpr = substituteBindings(thenExpr, labels, selector);
-                result = make.Conditional(condition, thenExpr, result);
-            }
-            return result;
-        }
-
-        private JCExpression extractCaseExpression(JCCase caseNode){
-            // Try body field first (arrow cases)
-            JCTree body = getArrowCaseBody(caseNode);
-            if(body instanceof JCExpression){
-                return (JCExpression)body;
-            }else if(body instanceof JCExpressionStatement){
-                return ((JCExpressionStatement)body).expr;
-            // Try stats (colon cases with yield)
-            }else if(caseNode.stats != null){
-                for(JCStatement stmt : caseNode.stats){
-                    JCExpression yieldValue = getYieldValue(stmt);
-                    if(yieldValue != null) return yieldValue;
-                }
-            }
-            return null;
-        }
-
-        private JCExpression buildCondition(List<JCTree> labels, JCExpression selector, JCCase caseNode){
-            JCExpression condition = null;
-            for(JCTree label : labels){
-                JCExpression labelCond = buildLabelCondition(label, selector);
-                if(labelCond == null) continue;
-                condition = condition == null ? labelCond : make.Binary(JCTree.Tag.OR, condition, labelCond);
-            }
-
-            // Add guard
-            JCExpression guard = getGuard(caseNode);
-            if(guard != null){
-                guard = substituteBindings(copy(guard), labels, selector);
-                condition = condition == null ? guard : make.Binary(JCTree.Tag.AND, condition, guard);
-            }
-
-            return condition;
-        }
-
-        private JCExpression buildLabelCondition(JCTree label, JCExpression selector){
-            if(isNullLabel(label)){
-                return make.Binary(JCTree.Tag.EQ, copy(selector), make.Literal(TypeTag.BOT, null));
-            }else if(isPatternLabel(label)){
-                return buildPatternCondition(label, selector);
-            }else if(!isDefaultLabel(label)){
-                JCExpression expr = getLabelExpression(label);
-                if(expr == null) return null;
-                return make.Apply(List.nil(), make.Select(copy(selector), names.equals), List.of(expr));
-            }
-            return null;
-        }
-
-        private JCExpression buildPatternCondition(JCTree label, JCExpression selector){
-            JCVariableDecl var = getPatternVar(label);
-            if(var != null) return make.TypeTest(copy(selector), var.vartype);
-            JCExpression recordType = getRecordPatternType(label);
-            if(recordType == null) return null;
-            return make.TypeTest(copy(selector), recordType);
-        }
-
-        private JCExpression substituteBindings(JCExpression expr, List<JCTree> labels, JCExpression selector){
-            Map<Name, JCExpression> bindings = collectBindings(labels, selector);
-            if(bindings.isEmpty()) return expr;
-            return new TreeTranslator(){
-                @Override
-                public void visitIdent(JCIdent tree){
-                    JCExpression repl = bindings.get(tree.name);
-                    result = repl != null ? copy(repl) : tree;
-                }
-            }.translate(expr);
-        }
-
-        private Map<Name, JCExpression> collectBindings(List<JCTree> labels, JCExpression selector){
-            Map<Name, JCExpression> bindings = new HashMap<>();
-            for(JCTree label : labels){
-                collectBindingsFromLabel(label, selector, bindings);
-            }
-            return bindings;
-        }
-
-        private void collectBindingsFromLabel(JCTree label, JCExpression selector, Map<Name, JCExpression> bindings){
-            JCVariableDecl var = getPatternVar(label);
-            if(var != null){
-                bindings.put(var.name, make.TypeCast(var.vartype, copy(selector)));
+            if(!needsTransform(tree.cases)){
+                tree.cases = injectDefault(tree.cases);
                 return;
             }
 
-            // Record pattern
-            JCExpression recordType = getRecordPatternType(label);
-            List<JCPattern> nested = getRecordPatternNested(label);
-            if(recordType == null || nested == null) return;
-            for(JCPattern nestedPat : nested){
-                JCVariableDecl nestedVar = getPatternVar(nestedPat);
-                if(nestedVar == null) continue;
-
-                JCExpression casted = make.TypeCast(recordType, copy(selector));
-                JCExpression accessor = make.Apply(List.nil(), make.Select(casted, nestedVar.name), List.nil());
-                bindings.put(nestedVar.name, accessor);
+            make.at(tree.pos);
+            if(isComplex(tree.selector)){
+                Name sv = names.fromString("$switch$" + (tempVarCounter++));
+                result = make.Block(0, List.of(
+                    makeFinalVar(sv, make.Type(syms.objectType), tree.selector),
+                    transformSwitch(make.Ident(sv), tree.cases, false, null)
+                ));
+            }else{
+                result = transformSwitch(tree.selector, tree.cases, false, null);
             }
         }
 
-        private JCExpression copy(JCExpression expr){
-            return new TreeCopier<Void>(make).copy(expr);
-        }
 
-        // ========== If-Else chain conversion ==========
-
-        private JCBlock transformPatternSwitch(JCSwitch switchNode){
-            make.at(switchNode.pos);
-            Name varName = names.fromString("$obj" + (tempVarCounter++));
-            JCExpression varType = switchNode.selector.type != null ?
-                make.Type(switchNode.selector.type) : make.Ident(names.fromString("Object"));
-            ListBuffer<JCStatement> stmts = new ListBuffer<>();
-
-            stmts.append(make.VarDef(make.Modifiers(Flags.FINAL), varName, varType, switchNode.selector));
-            JCStatement ifChain = buildIfElseChain(switchNode.cases, varName);
-
-            if(ifChain != null) stmts.append(ifChain);
-            return make.Block(0, stmts.toList());
-        }
-
-        private JCStatement buildIfElseChain(List<JCCase> cases, Name varName){
-            java.util.List<JCCase> caseList = java.util.List.copyOf(cases);
-
-            // Find default
-            JCStatement defaultStmt = null;
-            for(JCCase caseNode : cases){
-                if(!containsDefaultLabel(caseNode)) continue;
-                defaultStmt = buildCaseBody(caseNode, varName);
-                break;
-            }
-
-            JCStatement elseStmt = defaultStmt;
-            // TODO: remake
-            for(int i = caseList.size() - 1; i >= 0; i--){
-                JCCase caseNode = caseList.get(i);
-                if(containsDefaultLabel(caseNode)) continue;
-
-                List<JCTree> labels = getCaseLabels(caseNode);
-                JCExpression condition = buildConditionForVar(labels, varName, caseNode);
-                if(condition == null) continue;
-
-                JCStatement thenStmt = buildCaseBody(caseNode, varName);
-                elseStmt = make.If(condition, thenStmt, elseStmt);
-            }
-
-            return elseStmt;
-        }
-
-        private JCExpression buildConditionForVar(List<JCTree> labels, Name varName, JCCase caseNode){
-            JCExpression condition = null;
-            for(JCTree label : labels){
-                JCExpression labelCond = buildLabelConditionForVar(label, varName);
-                if(labelCond == null) continue;
-                condition = condition == null ? labelCond : make.Binary(JCTree.Tag.OR, condition, labelCond);
-            }
-
-            // Add guard
-            JCExpression guard = getGuard(caseNode);
-            if(guard != null){
-                Map<Name, JCExpression> bindings = collectBindingsForVar(labels, varName);
-                if(!bindings.isEmpty()){
-                    guard = new TreeTranslator(){
-                        @Override
-                        public void visitIdent(JCIdent tree){
-                            JCExpression repl = bindings.get(tree.name);
-                            result = repl != null ? repl : tree;
+        @Override
+        public void visitBlock(JCBlock tree){
+            ListBuffer<JCStatement> buffer = null;
+            for(JCStatement stmt : tree.stats){
+                List<JCSwitchExpression> found = findPatternSwitches(stmt);
+                for(JCSwitchExpression sw : found){
+                    if(!isComplex(sw.selector)) continue;
+                    if(buffer == null) {
+                        ListBuffer<JCStatement> buf = new ListBuffer<>();
+                        for(JCStatement s : tree.stats){
+                            if(s == stmt) break;
+                            buf.append(s);
                         }
-                    }.translate(guard);
+                        buffer = buf;
+                    }
+
+                    Name sv = names.fromString("$switch$" + (tempVarCounter++));
+                    buffer.append(make.VarDef(make.Modifiers(0), sv, make.Type(syms.objectType), null));
+                    captures.put(sw, sw.selector);
+                    sw.selector = make.Ident(sv);
                 }
-                condition = condition == null ? guard : make.Binary(JCTree.Tag.AND, condition, guard);
+                if(buffer != null) buffer.append(stmt);
             }
-            return condition;
+            if(buffer != null) tree.stats = buffer.toList();
+            super.visitBlock(tree);
         }
 
-        private JCExpression buildLabelConditionForVar(JCTree label, Name varName){
-            if(isNullLabel(label)){
-                return make.Binary(JCTree.Tag.EQ, make.Ident(varName), make.Literal(TypeTag.BOT, null));
-            } else if(isPatternLabel(label)){
-                JCVariableDecl var = getPatternVar(label);
-                if(var != null) return make.TypeTest(make.Ident(varName), var.vartype);
-                JCExpression recordType = getRecordPatternType(label);
-                if(recordType != null) return make.TypeTest(make.Ident(varName), recordType);
-            } else if(!isDefaultLabel(label)){
-                JCExpression expr = getLabelExpression(label);
-                if(expr == null) return null;
-                return make.Apply(List.nil(), make.Select(make.Ident(varName), names.equals), List.of(expr));
+        @Override
+        public <T extends JCTree> T translate(T tree){
+            if(tree == null) return null;
+            helper.collectRecord(tree);
+            if(!isSwitchExpression(tree)) return super.translate(tree);
+
+            JCSwitchExpression sw = (JCSwitchExpression)tree;
+            make.at(sw.pos);
+            JCExpression rawSel = captures.remove(sw); // consume capture if registered
+            sw.selector = translate(sw.selector);
+            sw.cases = translate(sw.cases);
+
+            if(needsTransform(sw.cases)){
+                JCSwitch ns = transformSwitch(sw.selector, sw.cases, true, rawSel);
+                sw.selector = ns.selector;
+                sw.cases = ns.cases;
+            }else{
+                sw.cases = injectDefault(sw.cases);
             }
-            return null;
+            return tree;
         }
 
-        private Map<Name, JCExpression> collectBindingsForVar(List<JCTree> labels, Name varName){
-            Map<Name, JCExpression> bindings = new HashMap<>();
-            for(JCTree label : labels){
-                JCVariableDecl var = getPatternVar(label);
-                if(var == null) continue;
-                bindings.put(var.name, make.TypeCast(var.vartype, make.Ident(varName)));
-            }
-            return bindings;
+        /** TreeTranslator skips the arrow body field, translate it manually. */
+        @Override
+        public void visitCase(JCCase tree){
+            super.visitCase(tree);
+            JCTree body = getBody(tree);
+            if(body == null) return;
+            JCTree saved = result;
+            setCaseBody(tree, translate(body));
+            result = saved;
         }
 
-        private JCStatement buildCaseBody(JCCase caseNode, Name varName){
-            ListBuffer<JCStatement> stmts = new ListBuffer<>();
-
-            // Add binding declarations
-            for(JCTree label : getCaseLabels(caseNode)){
-                if(!isPatternLabel(label)) continue;
-                JCVariableDecl var = getPatternVar(label);
-                if(var == null) continue;
-                stmts.append(make.VarDef(make.Modifiers(Flags.FINAL), var.name, var.vartype,
-                             make.TypeCast(var.vartype, make.Ident(varName))));
-            }
-
-            // Add body
-            JCTree body = getArrowCaseBody(caseNode);
-            if(body instanceof JCStatement){
-                stmts.append((JCStatement)body);
-            }else if(caseNode.stats != null){
-                for(JCStatement stmt : caseNode.stats) stmts.append(stmt);
-            }
-
-            return stmts.isEmpty() ? make.Block(0, List.nil()) : make.Block(0, stmts.toList());
+        /** Recursively collects all JCSwitchExpression nodes inside a statement. */
+        private List<JCSwitchExpression> findPatternSwitches(JCTree node){
+            ListBuffer<JCSwitchExpression> out = new ListBuffer<>();
+            new TreeScanner<Void, Void>(){
+                @Override
+                public Void scan(Tree t, Void v){
+                    if(t == null) return null;
+                    if(isSwitchExpression(t)){
+                        JCSwitchExpression se = (JCSwitchExpression)t;
+                        if(needsTransform(se.cases)) out.append(se);
+                        // Don't recurse into the switch itself, nested ones handled separately.
+                        return null;
+                    }
+                    return super.scan(t, v);
+                }
+            }.scan(node, null);
+            return out.toList();
         }
     }
 
-    // endregion
+    /**
+     * Replaces a pattern/null switch to a standard switch using a ternary-chain dispatcher in the condition.
+     * <p>
+     * The ternary chain maps each case condition to an index which becomes the new selector. <br>
+     * Each case label is rewritten with this index, plus the record pattern, if any, is lowered to the case. <br>
+     *
+     * @param sel the selector expression
+     * @param cases already-translated case list
+     * @param expression whether to build a switch expression or statement
+     * @param rawSel original selector to inject as a capture, or {@code null}
+     */
+    public JCSwitch transformSwitch(JCExpression sel, List<JCCase> cases, boolean expression,
+                                    JCExpression rawSel){
+        java.util.List<JCCase> nonDefs = new ArrayList<>();
+        JCCase defCase = null;
+        for(JCCase c : cases){
+            if(hasDefault(c)) defCase = c;
+            else nonDefs.add(c);
+        }
+        int n = nonDefs.size();
+
+        // Ternary chain
+        final Name selName = sel instanceof JCIdent ? ((JCIdent)sel).name : null;
+        JCExpression ternary = make.Literal(n);
+        for(int i = n - 1; i >= 0; i--){
+            JCCase c = nonDefs.get(i);
+            JCExpression cond = buildCondition(getLabels(c), sel, c);
+            if(cond == null) continue;
+            if(i == 0 && rawSel != null && selName != null){
+                // Replace the first reference to the selector ident with (sv = rawSel).
+                final boolean[] done = {false};
+                cond = new TreeTranslator(){
+                    @Override public void visitIdent(JCIdent id){
+                        if(!done[0] && id.name == selName){
+                            done[0] = true;
+                            result  = make.Parens(make.Assign(make.Ident(selName), rawSel));
+                        }else result = id;
+                    }
+                }.translate(cond);
+            }
+            ternary = make.Conditional(cond, make.Literal(i), ternary);
+        }
+        // In case of
+        if(n == 0 && rawSel != null && selName != null) {
+            ternary = make.Parens(make.Assign(make.Ident(selName), rawSel));
+        }
+
+        // Rebuild cases with int label
+        ListBuffer<JCCase> newCases = new ListBuffer<>();
+        for(int i = 0; i < n; i++){
+            JCCase nc = makeCase(
+                CaseTree.CaseKind.STATEMENT,
+                List.of(makeLabel(i)),
+                null,
+                List.of(make.Block(0, buildCaseBody(nonDefs.get(i), sel, expression))),
+                null
+            );
+            if(nc != null) newCases.append(nc);
+        }
+
+        // Default case
+        JCTree dl = makeDefaultCaseLabel();
+        if(dl != null){
+            JCCase dc = makeCase(
+                CaseTree.CaseKind.STATEMENT,
+                List.of(dl),
+                null,
+                List.of(make.Block(0, defCase != null
+                    ? buildCaseBody(defCase, sel, expression)
+                    : List.of(makeMatchExceptionThrow())
+                )),
+                null
+            );
+            if(dc != null) newCases.append(dc);
+        }
+
+        return make.Switch(ternary, newCases.toList());
+    }
+
+    public List<JCStatement> buildCaseBody(JCCase c, JCExpression sel, boolean expression){
+        ListBuffer<JCStatement> out = new ListBuffer<>();
+        addBindings(c, sel, out);
+        JCTree body = getBody(c);
+
+        if(body instanceof JCBlock){
+            for(JCStatement s : ((JCBlock)body).stats) out.append(s);
+        }else if(body != null){
+            JCExpression expr = extractExpression(body);
+            if(expr != null){
+                if(expression) out.append(make.Yield(expr));
+                else{
+                    out.append(make.Exec(expr));
+                    out.append(make.Break(null));
+                }
+            }else if(body instanceof JCStatement){
+                out.append((JCStatement)body);
+            }
+        }else if(c.stats != null){
+            for(JCStatement s : c.stats) out.append(s);
+        }
+
+        return out.toList();
+    }
+
+    /**
+     * Injects {@code default: throw new UnsupportedOperationException("MatchException");}
+     * for exhaustive switches that have no explicit default.
+     */
+    public List<JCCase> injectDefault(List<JCCase> cases){
+        if(cases == null) return cases;
+        for(JCCase c : cases){
+            if(c != null && hasDefault(c)) return cases;
+        }
+
+        CaseTree.CaseKind kind = CaseTree.CaseKind.STATEMENT;
+        for(JCCase c : cases){
+            if(c != null){
+                kind = c.getCaseKind();
+                break;
+            }
+        }
+
+        JCTree defaultLabel = makeDefaultCaseLabel();
+        if(defaultLabel == null) return cases;
+
+        JCStatement throwStmt = makeMatchExceptionThrow();
+        JCCase defaultCase = makeCase(
+            kind,
+            List.of(defaultLabel),
+            null,
+            List.of(throwStmt),
+            kind == CaseTree.CaseKind.RULE ? throwStmt : null
+        );
+        return defaultCase != null ? cases.append(defaultCase) : cases;
+    }
+
+
+    public JCExpression buildCondition(List<JCTree> labels, JCExpression sel, JCCase caseTree){
+        JCExpression condition = null;
+        for(JCTree label : labels){
+            JCExpression lc = buildLabelCondition(label, sel);
+            if(lc == null) continue;
+            condition = condition == null ? lc : make.Binary(JCTree.Tag.OR, condition, lc);
+        }
+
+        JCExpression guard = getGuard(caseTree);
+        if(guard == null) return condition;
+
+        Map<Name, JCExpression> bindingMap = collectBindings(labels, sel);
+        if(!bindingMap.isEmpty()){
+            guard = new TreeTranslator(){
+                @Override
+                public void visitIdent(JCIdent ident){
+                    JCExpression replacement = bindingMap.get(ident.name);
+                    result = replacement != null ? replacement : ident;
+                }
+            }.translate(guard);
+        }
+
+        return condition == null ? guard : make.Binary(JCTree.Tag.AND, condition, guard);
+    }
+
+    public JCExpression buildLabelCondition(JCTree label, JCExpression sel){
+        if(isNull(label)){
+            return make.Binary(JCTree.Tag.EQ, helper.copy(sel), make.Literal(TypeTag.BOT, null));
+        }else if(isPattern(label)){
+            JCVariableDecl pv = getPatternVar(label);
+            if(pv != null) return make.TypeTest(helper.copy(sel), pv.vartype);
+            JCExpression rt = getRecordType(label);
+            if(rt != null) return make.TypeTest(helper.copy(sel), rt);
+            JCExpression pt = getPatternType(label);
+            if(pt != null) return make.TypeTest(helper.copy(sel), pt);
+        }else if(!isDefault(label)){
+            JCExpression expr = getLabelExpression(label);
+            if(expr != null) return make.Apply(
+                List.nil(),
+                make.Select(expr, names.equals),
+                List.of(helper.copy(sel))
+            );
+        }
+        return null;
+    }
+
+    public Map<Name, JCExpression> collectBindings(List<JCTree> labels, JCExpression sel){
+        Map<Name, JCExpression> map = new HashMap<>();
+        for(JCTree label : labels){
+            JCVariableDecl pv = getPatternVar(label);
+            if(pv != null){
+                map.put(pv.name, make.TypeCast(pv.vartype, helper.copy(sel)));
+                continue;
+            }
+
+            JCExpression rt = getRecordType(label);
+            List<JCPattern> nested = getRecordNested(label);
+            if(rt == null || nested == null) continue;
+
+            List<Name> componentNames = helper.getRecordComponentNames(label);
+            int i = 0;
+            for(JCTree np : nested){
+                Name cn = i < componentNames.size() ? componentNames.get(i++) : null;
+                JCVariableDecl nv = getPatternVar(np);
+                if(nv == null) continue;
+
+                map.put(nv.name, make.Apply(
+                    List.nil(),
+                    make.Select(make.TypeCast(rt, helper.copy(sel)), cn != null ? cn : nv.name),
+                    List.nil()
+                ));
+            }
+        }
+        return map;
+    }
+
+    private void addBindings(JCCase caseTree, JCExpression sel, ListBuffer<JCStatement> out){
+        for(JCTree label : getLabels(caseTree)){
+            if(!isPattern(label)) continue;
+
+            JCVariableDecl pv = getPatternVar(label);
+            if(pv != null){
+                out.append(make.VarDef(
+                    make.Modifiers(Flags.FINAL),
+                    pv.name,
+                    pv.vartype,
+                    make.TypeCast(pv.vartype, helper.copy(sel))
+                ));
+                continue;
+            }
+
+            JCExpression rt = getRecordType(label);
+            List<JCPattern> nested = getRecordNested(label);
+            if(rt == null || nested == null) continue;
+
+            Name cv = helper.tempName();
+            out.append(helper.makeVarDef(cv, rt, helper.makeCast(rt, helper.copy(sel))));
+            ListBuffer<JCVariableDecl> bindings = new ListBuffer<>();
+            helper.extractRecordBindings(
+                nested,
+                make.Ident(cv),
+                helper.getRecordComponentNames(label),
+                bindings
+            );
+            for(JCVariableDecl decl : bindings) out.append(decl);
+        }
+    }
+
+    private boolean isComplex(JCExpression expr){
+        if(expr instanceof JCIdent || expr instanceof JCLiteral) return false;
+        if(expr instanceof JCFieldAccess) return isComplex(((JCFieldAccess)expr).selected);
+        if(expr instanceof JCParens) return isComplex(((JCParens)expr).expr);
+        return true; // method calls, new, binary ops, etc.
+    }
+
+    private static boolean needsTransform(List<JCCase> cases){
+        return hasPatterns(cases) || hasNull(cases);
+    }
+
+    private JCExpression extractExpression(JCTree body){
+        if(body instanceof JCExpressionStatement) return ((JCExpressionStatement)body).expr;
+        if(body instanceof JCExpression) return (JCExpression)body;
+        return null;
+    }
+
+    private JCStatement makeFinalVar(Name name, JCExpression type, JCExpression init){
+        return make.VarDef(make.Modifiers(Flags.FINAL), name, type, init);
+    }
+
+    private JCStatement makeMatchExceptionThrow(){
+        return make.Throw(make.NewClass(
+            null,
+            List.nil(),
+            make.Ident(names.fromString("UnsupportedOperationException")),
+            List.of(make.Literal("MatchException")),
+           null
+        ));
+    }
+
+    // end region
 }

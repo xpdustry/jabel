@@ -3,78 +3,40 @@ package com.github.bsideup.jabel;
 import com.sun.source.util.*;
 import com.sun.tools.javac.api.*;
 import com.sun.tools.javac.code.*;
+import com.sun.tools.javac.comp.*;
 import com.sun.tools.javac.util.*;
 
 import sun.misc.*;
 
 import java.lang.reflect.*;
 
+
 @SuppressWarnings({"deprecation", "removal"})
 public class JabelCompilerPlugin implements Plugin{
+    static Unsafe unsafe;
     static{
         try{
-            Field field = Source.Feature.class.getDeclaredField("minLevel");
+            Field featureField = Source.Feature.class.getDeclaredField("minLevel");
             Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
             unsafeField.setAccessible(true);
-            Unsafe unsafe = (Unsafe)unsafeField.get(null);
-            long staticFieldOffset = unsafe.objectFieldOffset(field);
-            String[] feats = {
-                // Java 9
-                "PRIVATE_SAFE_VARARGS",
-                "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION",
-                "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES",
-                "PRIVATE_INTERFACE_METHODS",
-                //"MODULES",               // Impossible: cannot make a module-info.java in Java 8
-                // Java 10
-                "LOCAL_VARIABLE_TYPE_INFERENCE",
-                // Java 11
-                "VAR_SYNTAX_IMPLICIT_LAMBDAS",
-                // Java 14
-                "SWITCH_MULTIPLE_CASE_LABELS",
-                "SWITCH_RULE",
-                "SWITCH_EXPRESSION",
-                "NO_TARGET_ANNOTATION_APPLICABILITY",
-                // Java 15
-                "TEXT_BLOCKS",
-                // Java 16
-                "PATTERN_MATCHING_IN_INSTANCEOF",
-                "REIFIABLE_TYPES_INSTANCEOF",
-                "RECORDS",
-                // Java 17
-                "SEALED_CLASSES",
-                "REDUNDANT_STRICTFP",
-                // Java 19
-                "PRIVATE_MEMBERS_IN_PERMITS_CLAUSE", //appeared in Java24+
-                // Java 21
-                "CASE_NULL",
-                "PATTERN_SWITCH",
-                "UNCONDITIONAL_PATTERN_IN_INSTANCEOF",
-                "RECORD_PATTERNS",
-                //"STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
-                //"WARN_ON_ILLEGAL_UTF8",  // Not relevant: was just a warning and removed since Java 21
-                // Java 22
-                "UNNAMED_VARIABLES",
-                // Java 23
-                "PRIMITIVE_PATTERNS",      // TODO: still a preview but i keep it
-                // Java 24
-                "ERASE_POLY_SIG_RETURN_TYPE",
-                // Java 25
-                //"FLEXIBLE_CONSTRUCTORS", // Not relevant: very hard to implement
-                "IMPLICIT_CLASSES",
-                //"MODULE_IMPORTS",        // Impossible: needs the modules system
-                //"JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
+            /*Unsafe*/ unsafe = (Unsafe)unsafeField.get(null);
+            long featureFieldOffset = unsafe.objectFieldOffset(featureField);
+
+            // List of features that are impossible or too difficult to adapt.
+            String[] blacklist = {
+                "MODULES",               // Impossible: cannot make a module-info.java in Java 8
+                "STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
+                "MODULE_IMPORTS",        // Impossible: needs the modules system
+                "JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
             };
 
-            for(String name : feats){
-                try{
-                    Source.Feature feat = Source.Feature.valueOf(name);
-                    unsafe.putObject(feat, staticFieldOffset, Source.JDK8);
-                }catch(IllegalArgumentException e){
-                    String msg = e.getMessage() == null ? name : e.getMessage().replace("No enum constant ", "");
-                    System.err.println("WARNING: Unknown feature: " + msg);
-                }
+            // We don't care, enable everything except few ones
+            for(Source.Feature feat : Source.Feature.values()){
+                if(Arrays_contains(blacklist, feat.name())) continue;
+                Source current = (Source)unsafe.getObject(feat, featureFieldOffset);
+                if(current.ordinal() > Source.JDK8.ordinal())
+                    unsafe.putObject(feat, featureFieldOffset, Source.JDK8);
             }
-
         }catch(Exception e){
             throw new RuntimeException(e);
         }
@@ -83,9 +45,13 @@ public class JabelCompilerPlugin implements Plugin{
     @Override
     public void init(JavacTask task, String... args){
         Context context = ((BasicJavacTask)task).getContext();
-        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
+        patchCachedFeatures(context);
+        patchPreview(context);
+        removeUnderscoreWarnings(context);
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
+        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
+        task.addTaskListener(new ImplicitClassRetrofittingTaskListener(context));
     }
 
     @Override
@@ -96,5 +62,91 @@ public class JabelCompilerPlugin implements Plugin{
     // Make it auto start on Java 14+
     public boolean autoStart(){
         return true;
+    }
+
+    /**
+     * Several compiler components cache {@code Feature.allowedInSource()} results. <br>
+     * Since these objects may be created <em>before</em> Jabel,
+     * this method will try to force all {@code allow*} fields to {@code true}.
+     */
+    private static void patchCachedFeatures(Context context){
+        Object[] comps = {
+            Attr.instance(context),
+            Check.instance(context),
+            Resolve.instance(context),
+        };
+
+        for(Object comp : comps){
+            for(Field f : comp.getClass().getDeclaredFields()){
+                try{
+                    if(f.getType() != boolean.class || !f.getName().startsWith("allow")) continue;
+                    unsafe.putBoolean(comp, unsafe.objectFieldOffset(f), true);
+                }catch(Exception ignored){}
+             }
+        }
+    }
+
+    /** Removes warnings about {@code '_'}. */
+    private static void removeUnderscoreWarnings(Context context) {
+        // Need to inherit a class instead.
+        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) in Java 16-
+        Log.instance(context).new DiscardDiagnosticHandler() {
+            @Override
+            public void report(JCDiagnostic diag){
+                String code = diag.getCode();
+                if (code.contains("underscore.as.identifier") ||
+                    code.contains("use.of.underscore.not.allowed")) return;
+                prev.report(diag);
+            }
+        };
+    }
+
+    private static boolean patchPreview(Context context){
+        Preview preview = Preview.instance(context);
+
+        try{
+            // Enable preview features
+            Field enabledField = Preview.class.getDeclaredField("enabled");
+            unsafe.putBoolean(preview, unsafe.objectFieldOffset(enabledField), true);
+        }catch(Exception e){
+            System.err.println("WARNING: Failed to enable preview features.");
+            return false;
+        }
+
+        // Disable preview for TypeEnter, to avoid implicit StringTemplate import on Java 21-23
+        try{
+            Symtab.class.getDeclaredField("stringTemplateType"); // Simple check
+            Field previewField = TypeEnter.class.getDeclaredField("preview");
+            TypeEnter enter = TypeEnter.instance(context);
+            unsafe.putObject(enter, unsafe.objectFieldOffset(previewField), Preview.instance(new Context()));
+        }catch(Exception ignored){}
+
+        try{
+            // Disable preview removal warning
+            try{
+                Field verboseField = Preview.class.getDeclaredField("verbose");
+                unsafe.putBoolean(preview, unsafe.objectFieldOffset(verboseField), false);
+            }catch(NoSuchFieldException e){
+                Field handlerField = Preview.class.getDeclaredField("previewHandler");
+                handlerField.setAccessible(true);
+                MandatoryWarningHandler handler = (MandatoryWarningHandler)handlerField.get(preview);
+                Field handlerVerbose = MandatoryWarningHandler.class.getDeclaredField("verbose");
+                unsafe.putBoolean(handler, unsafe.objectFieldOffset(handlerVerbose), false);
+            }
+        }catch(Exception e){
+            System.err
+                    .println("WARNING: Failed to suppress preview feature warnings. " + "Don't worry if you see weird messages.");
+            return false;
+        }
+
+        return true;
+    }
+
+    private static <T> boolean Arrays_contains(T[] arr, T item){
+        for(T e : arr){
+            if(e == item || e != null && e.equals(item))
+                return true;
+        }
+        return false;
     }
 }

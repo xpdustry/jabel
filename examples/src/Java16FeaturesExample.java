@@ -39,7 +39,16 @@ import java.util.Objects;
  * </pre>
  */
 public class Java16FeaturesExample {
-    record Point(int x, int y) {}
+    record Pair<A, B>(A first, B second) {}
+
+    record Point(int x, int y) {
+        public Point(int x, int y) {
+            if (x > Short.MAX_VALUE) throw new IllegalArgumentException();
+            this.x = x;
+            if (y > Short.MAX_VALUE) throw new IllegalArgumentException();
+            this.y = y;
+        }
+    }
 
     record Person(String name, int age) {
         Person {
@@ -67,10 +76,16 @@ public class Java16FeaturesExample {
         Integer.valueOf(len); // use variable to get expected byte code
     }
 
+    int inlinePatternMatching(Object obj) {
+        return obj instanceof String s ? s.length() : obj instanceof Integer i ? i : -1;
+    }
+
     void reifiableTypesInstanceof(Object obj) {
-        if (obj instanceof List<?> list) {
-            System.out.println(list.size());
+        if (!(obj instanceof List<?> list)) {
+            System.out.println("Not a list");
+            return;
         }
+        System.out.println(list.size());
     }
 
     void recordsExample() {
