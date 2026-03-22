@@ -24,7 +24,9 @@ jobs:
           distribution: 'temurin'
           
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/actions/setup-gradle@v5
+        with:
+          gradle-version: 8.14 # because some properties are incompatible with gradle 9
 
       - name: Build Artifacts
         run: gradle build
