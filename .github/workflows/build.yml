@@ -26,7 +26,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
         with:
-          gradle-version: 8.14 # because some properties are incompatible with gradle 9
+          gradle-version: 8.14.4 # because some properties are incompatible with gradle 9
 
       - name: Build Artifacts
         run: gradle build
@@ -35,7 +35,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: "${{ github.event.repository.name }}"
-          path: build/libs/${{ github.event.repository.name }}.jar
+          path: build/libs/${{ github.event.repository.name }}*.jar
           if-no-files-found: error
 
       - name: Publish Artifacts
