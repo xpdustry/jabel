@@ -15,6 +15,7 @@ import java.util.*;
 import static com.github.bsideup.jabel.RecordPatternHelper.*;
 
 
+//TODO: the class need some reworking since JCSwitchExpression doesn't exists in Java 12-
 /**
  * Transforms modern switch constructs (Java 17+) into Java 8 compatible code.
  * <p>
@@ -79,6 +80,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         }
     }
 
+    //TODO: CaseTree.CaseKind doesn't exists in Java 12-
     /**
      * Create a new case tree, handling different JDK signatures. <br>
      * JDK 21+: Case(CaseKind, List labels, JCExpression guard, List stats, JCTree body) <br>
@@ -89,7 +91,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                             List<JCStatement> stats, JCTree body){
         if (GUARDS != false) {
             try{
-                JCCase c = make.Case(kind, (List<JCCaseLabel>)(List<?>)labels, guard, stats, body);
+                JCCase c = make.Case(kind, (List<JCCaseLabel>)labels, guard, stats, body);
                 GUARDS = true;
                 return c;
             }catch(NoSuchMethodError ignored){}
@@ -106,78 +108,41 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         return null;
     }
 
-    //TODO
-    private static final Method MAKE_DEFAULT_CASE_LABEL;
-    static{
-        Method m = null;
-        try{ m = TreeMaker.class.getMethod("DefaultCaseLabel"); }
-        catch(NoSuchMethodException | NoSuchMethodError ignored){}
-        MAKE_DEFAULT_CASE_LABEL = m;
+    // Because the return type of these two methods may not exist, we need delay the call to an inner class.
+    // Like that, the class initialization error can be catched easily.
+    private static final class DefaultCaseLabelFactory{
+        static JCTree make(TreeMaker m){ return m.DefaultCaseLabel(); }
+    }
+    private static final class ConstantCaseLabelFactory{
+        static JCTree make(TreeMaker m, JCExpression lit){ return m.ConstantCaseLabel(lit); }
     }
 
-    /** Creates a default case label, or null if unsupported. Uses reflection to avoid
-     * {@code JCDefaultCaseLabel}/{@code JCCaseLabel} references in the bytecode descriptor
-     * (those classes don't exist on JDK &lt; 17 and would cause {@code NoClassDefFoundError}
-     * at class-load time). */
+    /** Create a default case label. Returns null if unsupported (JDK < 17). */
     private JCTree makeDefaultCaseLabel(){
-        if(MAKE_DEFAULT_CASE_LABEL == null) return null;
-        try{ return (JCTree)MAKE_DEFAULT_CASE_LABEL.invoke(make); }
-        catch(Exception ignored){ return null; }
-    }
-
-    /**
-     * Creates a case label for an int constant, handling JDK 17-20 vs 21+ APIs.
-     * <p>
-     * {@code TreeMaker.ConstantCaseLabel} is invoked via reflection because its return type
-     * {@code JCConstantCaseLabel} doesn't exist on JDK 17. A direct call would embed that
-     * class name in the bytecode descriptor, causing {@code NoClassDefFoundError} at
-     * class-load time before any runtime guard executes.
-     * Casts to {@code JCConstantCaseLabel} elsewhere (e.g. in {@code isNull}) are safe:
-     * {@code checkcast} is resolved lazily at method-invocation time, not at class load.
-     */
-    private static final Method MAKE_CONSTANT_CASE_LABEL;
-    static{
-        Method m = null;
-        try{ m = TreeMaker.class.getMethod("ConstantCaseLabel", JCExpression.class); }
-        catch(NoSuchMethodException | NoSuchMethodError ignored){}
-        MAKE_CONSTANT_CASE_LABEL = m;
-        CONSTANT_CASES = m != null;
-    }
-
-    private JCTree makeLabel(int i){
-        if(MAKE_CONSTANT_CASE_LABEL != null)
-            try{ return (JCTree)MAKE_CONSTANT_CASE_LABEL.invoke(make, make.Literal(i)); }
-            catch(Exception ignored){}
-        return make.Literal(i);
-    }
-/*
-    /** Create a default case label. Returns null if unsupported (JDK < 17). *\/
-    private JCTree makeDefaultCaseLabel(){
-        if (DEFAULT_CASES != null) return DEFAULT_CASES ? make.DefaultCaseLabel() : null;
+        if (DEFAULT_CASES != null) return DEFAULT_CASES ? DefaultCaseLabelFactory.make(make) : null;
         try{
-            JCCaseLabel c = make.DefaultCaseLabel();
+            JCTree c = DefaultCaseLabelFactory.make(make);
             DEFAULT_CASES = true;
             return c;
-        }catch(NoSuchMethodError ignored){
+        }catch(NoSuchMethodError | NoClassDefFoundError ignored){
             DEFAULT_CASES = false;
             return null;
         }
     }
 
-    /** Creates a case label for an {@code Integer}, handling JDK 17-20 and 21+ APIs. *\/
+    /** Creates a case label for an {@code Integer}, handling JDK 17-20 and 21+ APIs. */
     private JCTree makeLabel(int i){
         if (CONSTANT_CASES != null)
-            return CONSTANT_CASES ? make.ConstantCaseLabel(make.Literal(i)) : make.Literal(i);
+            return CONSTANT_CASES ? ConstantCaseLabelFactory.make(make, make.Literal(i)) : make.Literal(i);
         try{
-            JCTree tree = make.ConstantCaseLabel(make.Literal(i)); // JDK 21+
+            JCTree tree = ConstantCaseLabelFactory.make(make, make.Literal(i)); // JDK 21+
             CONSTANT_CASES = true;
             return tree;
-        }catch(NoSuchMethodError ignored){
+        }catch(NoSuchMethodError | NoClassDefFoundError ignored){
             CONSTANT_CASES = false;
             return make.Literal(i); // JDK 17-20
         }
     }
-*/
 
     private static boolean isSwitchExpression(Tree tree){
         return tree != null && getClassName(tree).equals("JCSwitchExpression");
@@ -565,7 +530,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
             }
 
             JCExpression rt = getRecordType(label);
-            List<JCPattern> nested = getRecordNested(label);
+            List<? extends JCTree> nested = getRecordNested(label);
             if(rt == null || nested == null) continue;
 
             List<Name> componentNames = helper.getRecordComponentNames(label);
@@ -601,7 +566,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
             }
 
             JCExpression rt = getRecordType(label);
-            List<JCPattern> nested = getRecordNested(label);
+            List<? extends JCTree> nested = getRecordNested(label);
             if(rt == null || nested == null) continue;
 
             Name cv = helper.tempName();

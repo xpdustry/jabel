@@ -87,7 +87,7 @@ public class Java21FeaturesExample {
     }
 
     String caseNull(String input) {
-        return switch (input.toString()) {
+        return switch (input) {
             case "hello" -> "hello";
             case null -> "null";
             default -> "other";
@@ -95,7 +95,7 @@ public class Java21FeaturesExample {
     }
 
     String caseNullWithDefault(String input) {
-        return switch (input) {
+        return switch (input.toString()) {
             case "specific" -> "specific";
             case null, default -> "null or default";
         };

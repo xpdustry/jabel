@@ -16,30 +16,14 @@ public class JabelCompilerPlugin implements Plugin{
     static Unsafe unsafe;
     static{
         try{
-            Field featureField = Source.Feature.class.getDeclaredField("minLevel");
             Field unsafeField = Unsafe.class.getDeclaredField("theUnsafe");
             unsafeField.setAccessible(true);
-            /*Unsafe*/ unsafe = (Unsafe)unsafeField.get(null);
-            long featureFieldOffset = unsafe.objectFieldOffset(featureField);
-
-            // List of features that are impossible or too difficult to adapt.
-            String[] blacklist = {
-                "MODULES",               // Impossible: cannot make a module-info.java in Java 8
-                "STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
-                "MODULE_IMPORTS",        // Impossible: needs the modules system
-                "JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
-            };
-
-            // We don't care, enable everything except few ones
-            for(Source.Feature feat : Source.Feature.values()){
-                if(Arrays_contains(blacklist, feat.name())) continue;
-                Source current = (Source)unsafe.getObject(feat, featureFieldOffset);
-                if(current.ordinal() > Source.JDK8.ordinal())
-                    unsafe.putObject(feat, featureFieldOffset, Source.JDK8);
-            }
+            unsafe = (Unsafe)unsafeField.get(null);
         }catch(Exception e){
             throw new RuntimeException(e);
         }
+
+        forceSourceFeatures();
     }
 
     @Override
@@ -59,9 +43,41 @@ public class JabelCompilerPlugin implements Plugin{
         return "jabel";
     }
 
-    // Make it auto start on Java 14+
+    /** Make it auto starts on Java 14+. */
     public boolean autoStart(){
         return true;
+    }
+
+    private static void forceSourceFeatures() {
+        // We cannot easily force features bellow Java 10.35
+        try {
+            Class.forName("com.sun.tools.javac.code.Source$Feature");
+        }catch(Throwable ignored) {
+            return;
+        }
+
+        try{
+            Field featureField = Source.Feature.class.getDeclaredField("minLevel");
+            long featureFieldOffset = unsafe.objectFieldOffset(featureField);
+
+            // List of features that are impossible or too difficult to adapt.
+            String[] blacklist = {
+                "MODULES",               // Impossible: cannot make a module-info.java on Java 8
+                "STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
+                "MODULE_IMPORTS",        // Impossible: needs the modules system
+                "JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
+            };
+
+            // We don't care, enable everything except few ones
+            for(Source.Feature feat : Source.Feature.values()){
+                if(Arrays_contains(blacklist, feat.name())) continue;
+                Source current = (Source)unsafe.getObject(feat, featureFieldOffset);
+                if(current.ordinal() > Source.JDK8.ordinal())
+                    unsafe.putObject(feat, featureFieldOffset, Source.JDK8);
+            }
+        }catch(Exception e){
+            throw new RuntimeException(e);
+        }
     }
 
     /**
@@ -89,7 +105,7 @@ public class JabelCompilerPlugin implements Plugin{
     /** Removes warnings about {@code '_'}. */
     private static void removeUnderscoreWarnings(Context context) {
         // Need to inherit a class instead.
-        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) in Java 16-
+        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) on Java 16-
         Log.instance(context).new DiscardDiagnosticHandler() {
             @Override
             public void report(JCDiagnostic diag){
@@ -102,6 +118,12 @@ public class JabelCompilerPlugin implements Plugin{
     }
 
     private static boolean patchPreview(Context context){
+        try {
+            Class.forName("com.sun.tools.javac.code.Preview");
+        }catch(Throwable ignored) {
+            return false; // the class doesn't exists bellow Java 11.10
+        }
+
         Preview preview = Preview.instance(context);
 
         try{
@@ -128,14 +150,14 @@ public class JabelCompilerPlugin implements Plugin{
                 unsafe.putBoolean(preview, unsafe.objectFieldOffset(verboseField), false);
             }catch(NoSuchFieldException e){
                 Field handlerField = Preview.class.getDeclaredField("previewHandler");
-                handlerField.setAccessible(true);
-                MandatoryWarningHandler handler = (MandatoryWarningHandler)handlerField.get(preview);
+                MandatoryWarningHandler handler =
+                    (MandatoryWarningHandler)unsafe.getObject(preview, unsafe.objectFieldOffset(handlerField));
                 Field handlerVerbose = MandatoryWarningHandler.class.getDeclaredField("verbose");
                 unsafe.putBoolean(handler, unsafe.objectFieldOffset(handlerVerbose), false);
             }
         }catch(Exception e){
-            System.err
-                    .println("WARNING: Failed to suppress preview feature warnings. " + "Don't worry if you see weird messages.");
+            System.err.println("WARNING: Failed to suppress preview feature warnings. " +
+                               "Don't worry if you see weird messages.");
             return false;
         }
 

@@ -38,12 +38,21 @@ class RecordPatternHelper{
         return name.contains("Pattern") || name.contains("Binding");
     }
 
+    /**
+     * Because {@link JCPatternCaseLabel#pat} type is {@link JCPattern},
+     * we need to delay access to an inner class. <br>
+     * Like that, the class initialization error can be catched easily.
+     */
+    private static final class PatternCaseLabelAccess{
+        static JCTree pat(JCTree label){ return ((JCPatternCaseLabel)label).pat; }
+    }
+
     /** Get the binding variable from a pattern (binding pattern or pattern case label). */
     static JCVariableDecl getPatternVar(JCTree label){
         if(label == null) return null;
         switch(getClassName(label)){
             case "JCBindingPattern": return ((JCBindingPattern)label).var;
-            case "JCPatternCaseLabel": return getPatternVar(((JCPatternCaseLabel)label).pat);
+            case "JCPatternCaseLabel": return getPatternVar(PatternCaseLabelAccess.pat(label));
             default: return null;
         }
     }
@@ -58,7 +67,7 @@ class RecordPatternHelper{
             case "JCBindingPattern":
                 JCVariableDecl var = ((JCBindingPattern)label).var;
                 return var != null ? var.vartype : null;
-            case "JCPatternCaseLabel": return getPatternType(((JCPatternCaseLabel)label).pat);
+            case "JCPatternCaseLabel": return getPatternType(PatternCaseLabelAccess.pat(label));
             case "JCAnyPattern": return getAnyPatternType(label);
             default: return null;
         }
@@ -71,6 +80,7 @@ class RecordPatternHelper{
      * {@link JCTree#type} and {@link JCTree#getType()} differ between Java 22 and 23+.
      */
     static JCExpression getAnyPatternType(JCTree label){
+        //TODO: remake
         try{
             Object type = label.getClass().getField("type").get(label);
             if(type instanceof JCExpression) return (JCExpression)type;
@@ -87,17 +97,17 @@ class RecordPatternHelper{
         if(label == null) return null;
         switch(getClassName(label)){
             case "JCRecordPattern": return ((JCRecordPattern)label).deconstructor;
-            case "JCPatternCaseLabel": return getRecordType(((JCPatternCaseLabel)label).pat);
+            case "JCPatternCaseLabel": return getRecordType(PatternCaseLabelAccess.pat(label));
             default: return null;
         }
     }
 
     /** Get nested patterns from a record pattern or pattern case label. */
-    static List<JCPattern> getRecordNested(JCTree label){
+    static List<? extends JCTree> getRecordNested(JCTree label){
         if(label == null) return null;
         switch(getClassName(label)){
             case "JCRecordPattern": return ((JCRecordPattern)label).nested;
-            case "JCPatternCaseLabel": return getRecordNested(((JCPatternCaseLabel)label).pat);
+            case "JCPatternCaseLabel": return getRecordNested(PatternCaseLabelAccess.pat(label));
             default: return null;
         }
     }
@@ -142,11 +152,11 @@ class RecordPatternHelper{
         }
 
         // Fallback: use binding pattern names
-        List<JCPattern> nested = getRecordNested(pattern);
+        List<? extends JCTree> nested = getRecordNested(pattern);
         if(nested == null) return List.nil();
 
         List<Name> result = List.nil();
-        for(JCPattern p : nested){
+        for(JCTree p : nested){
             JCVariableDecl var = getPatternVar(p);
             result = result.append(var != null ? var.name : null);
         }
@@ -159,10 +169,10 @@ class RecordPatternHelper{
      * Generates variable declarations like:
      * {@code final Point $tmp = parent.b(); final int bx = $tmp.x(); final int by = $tmp.y();}
      */
-    void extractRecordBindings(List<JCPattern> nested, JCExpression baseAccessor,
+    void extractRecordBindings(List<? extends JCTree> nested, JCExpression baseAccessor,
                                List<Name> componentNames, ListBuffer<JCVariableDecl> out){
         int index = 0;
-        for(JCPattern nestedPattern : nested){
+        for(JCTree nestedPattern : nested){
             Name componentName = index < componentNames.size() ? componentNames.get(index++) : null;
 
             if(isBindingPattern(nestedPattern)){
@@ -175,7 +185,7 @@ class RecordPatternHelper{
 
             if(!isRecordPattern(nestedPattern)) continue;
             JCExpression nestedRecordType = getRecordType(nestedPattern);
-            List<JCPattern> deepNested = getRecordNested(nestedPattern);
+            List<? extends JCTree> deepNested = getRecordNested(nestedPattern);
             if(nestedRecordType == null || deepNested == null || componentName == null) continue;
             Name tempVar = tempName();
             JCExpression accessor = makeMethodCall(baseAccessor, componentName);

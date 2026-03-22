@@ -4,13 +4,14 @@ repositories.mavenCentral()
 dependencies.annotationProcessor rootProject//.files("build/libs/jabel.jar")
 
 // Force java 1.8
-compileJava {
+compileJava{
     targetCompatibility = JavaVersion.VERSION_1_8
     sourceCompatibility = JavaVersion.VERSION_25
     options.encoding = "UTF-8"
     options.release = 8
     
     // Needed to modify compiler options
+    //options.compilerArgs += "-Xplugin:jabel"
     options.fork = true
     options.forkOptions.jvmArgs += [
         "--add-opens=jdk.compiler/com.sun.tools.javac.code=ALL-UNNAMED",
@@ -23,7 +24,7 @@ sourceSets.main.java.srcDirs = ["src"]
 ext.mainClassName = "Main"
 jar.manifest.attributes["Main-Class"] = project.mainClassName
 
-task run(dependsOn: classes, type: JavaExec) {
+task run(dependsOn: classes, type: JavaExec){
     mainClass = project.mainClassName
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in

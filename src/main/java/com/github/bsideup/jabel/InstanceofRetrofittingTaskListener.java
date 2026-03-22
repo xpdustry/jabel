@@ -49,7 +49,7 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
                     if(isRecordPattern(pattern)){
                         transformRecordPattern(ifStmt, instanceOf, pattern);
                     }else if(isBindingPattern(pattern)){
-                        transformBindingPattern(ifStmt, instanceOf, (JCBindingPattern)pattern);
+                        transformBindingPattern(ifStmt, instanceOf, pattern);
                     }
                 }
                 return super.translate(tree);
@@ -92,8 +92,8 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
      * Transform: {@code if (obj instanceof String s) { body } } <br>
      * Into: {@code if (obj instanceof String) { String s = (String)obj; body } }
      */
-    public void transformBindingPattern(JCIf ifStmt, JCInstanceOf instanceOf, JCBindingPattern pattern){
-        JCVariableDecl var = pattern.var;
+    public void transformBindingPattern(JCIf ifStmt, JCInstanceOf instanceOf, JCTree pattern){
+        JCVariableDecl var = ((JCBindingPattern)pattern).var;
         if(var == null || var.vartype == null) return;
 
         helper.make.at(ifStmt.pos);
