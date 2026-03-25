@@ -39,7 +39,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish Artifacts
-#        if: ${{ github.event_name == 'release' }}
+        if: ${{ github.event_name == 'release' }}
         run: gradle publish
         env:
           ORG_GRADLE_PROJECT_xpdustryUsername: "${{ secrets.XPDUSTRY_MAVEN_USERNAME }}"
