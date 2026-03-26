@@ -14,7 +14,7 @@ jobs:
       - name: Set up JDK
         uses: actions/setup-java@v1
         with:
-          java-version: 14
+          java-version: 25
       - name: Deploy with Gradle
         env:
           GRADLE_PUBLISH_REPO_URL: ${{ secrets.GRADLE_PUBLISH_REPO_URL }}
