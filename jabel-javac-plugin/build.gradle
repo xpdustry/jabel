@@ -6,15 +6,15 @@ plugins {
 sourceCompatibility = targetCompatibility = 8
 
 dependencies {
-    implementation platform('net.bytebuddy:byte-buddy-parent:1.14.9')
+    implementation platform('net.bytebuddy:byte-buddy-parent:1.18.7')
     implementation 'net.bytebuddy:byte-buddy'
     implementation 'net.bytebuddy:byte-buddy-agent'
-    implementation 'net.java.dev.jna:jna:5.13.0'
+    implementation 'net.java.dev.jna:jna:5.18.0'
+    implementation 'net.java.dev.jna:jna-platform:5.18.0'
 }
 
-
 task sourcesJar(type: Jar) {
-    classifier 'sources'
+    archiveClassifier = 'sources'
     from sourceSets.main.allJava
 }
 
@@ -24,7 +24,7 @@ javadoc {
 
 task javadocJar(type: Jar) {
     from javadoc
-    classifier = 'javadoc'
+    archiveClassifier = 'javadoc'
 }
 
 publishing {

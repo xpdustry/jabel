@@ -3,7 +3,7 @@ plugins.withType(MavenPublishPlugin) {
         publications {
             mavenJava(MavenPublication) { publication ->
                 pom {
-                    description = 'Jabel - use modern Java 9-14 syntax when targeting Java 8.'
+                    description = 'Jabel - use modern Java 9-25 syntax when targeting Java 8.'
                     name = project.description ?: description
                     url = 'https://github.com/bsideup/jabel'
                     licenses {

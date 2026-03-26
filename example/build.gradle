@@ -3,11 +3,11 @@ plugins {
 }
 
 configure([tasks.compileJava]) {
-    sourceCompatibility = 16
+    sourceCompatibility = 25
     options.release = 8
 
     javaCompiler = javaToolchains.compilerFor {
-        languageVersion = JavaLanguageVersion.of(21)
+        languageVersion = JavaLanguageVersion.of(25)
     }
 }
 
@@ -22,8 +22,7 @@ test {
 }
 
 dependencies {
-    annotationProcessor project(":jabel-javac-plugin")
-    compileOnly project(":jabel-javac-plugin")
+    annotationProcessor project(":jabel-javac-plugin")//.files("build/libs/jabel-javac-plugin.jar")
 
     testImplementation 'junit:junit:4.13.2'
 }

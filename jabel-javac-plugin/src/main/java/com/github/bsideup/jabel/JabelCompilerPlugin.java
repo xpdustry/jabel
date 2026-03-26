@@ -4,8 +4,8 @@ import com.sun.source.util.JavacTask;
 import com.sun.source.util.Plugin;
 import com.sun.tools.javac.api.BasicJavacTask;
 import com.sun.tools.javac.code.Source;
-import com.sun.tools.javac.util.Context;
-import com.sun.tools.javac.util.JavacMessages;
+import com.sun.tools.javac.util.*;
+
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.asm.Advice;
@@ -28,6 +28,7 @@ import net.bytebuddy.utility.JavaModule;
 import java.util.*;
 
 import static net.bytebuddy.matcher.ElementMatchers.*;
+
 
 public class JabelCompilerPlugin implements Plugin {
     static {
@@ -102,6 +103,7 @@ public class JabelCompilerPlugin implements Plugin {
                     put("com.sun.tools.javac.api", Collections.singleton(jabelModule));
                     put("com.sun.tools.javac.tree", Collections.singleton(jabelModule));
                     put("com.sun.tools.javac.code", Collections.singleton(jabelModule));
+                    put("com.sun.tools.javac.comp", Collections.singleton(jabelModule));
                     put("com.sun.tools.javac.util", Collections.singleton(jabelModule));
                 }},
                 Collections.emptySet(),
@@ -112,21 +114,12 @@ public class JabelCompilerPlugin implements Plugin {
     @Override
     public void init(JavacTask task, String... args) {
         Context context = ((BasicJavacTask) task).getContext();
-        JavacMessages.instance(context).add(locale -> new ResourceBundle() {
-            @Override
-            protected Object handleGetObject(String key) {
-                return "{0}";
-            }
-
-            @Override
-            public Enumeration<String> getKeys() {
-                return Collections.enumeration(Arrays.asList("missing.desugar.on.record"));
-            }
-        });
+        removeUnderscoreWarnings(context);
 
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
-
-        System.out.println("Jabel: initialized");
+        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
+        task.addTaskListener(new SwitchRetrofittingTaskListener(context));
+        task.addTaskListener(new ImplicitClassRetrofittingTaskListener(context));
     }
 
     @Override
@@ -139,35 +132,41 @@ public class JabelCompilerPlugin implements Plugin {
         return true;
     }
 
-    static class AllowedInSourceAdvice {
+    /** Removes warnings about {@code '_'}. */
+    private static void removeUnderscoreWarnings(Context context) {
+        // Need to inherit a class instead.
+        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) on Java 16-
+        Log.instance(context).new DiscardDiagnosticHandler() {
+            @Override
+            public void report(JCDiagnostic diag) {
+                String code = diag.getCode();
+                if (code.contains("underscore.as.identifier") ||
+                    code.contains("use.of.underscore.not.allowed")) return;
+                prev.report(diag);
+            }
+        };
+    }
 
+    static class AllowedInSourceAdvice {
         @Advice.OnMethodEnter
         static void allowedInSource(
                 @Advice.This Source.Feature feature,
                 @Advice.Argument(value = 0, readOnly = false) Source source
         ) {
             switch (feature.name()) {
-                case "PRIVATE_SAFE_VARARGS":
-                case "SWITCH_EXPRESSION":
-                case "SWITCH_RULE":
-                case "SWITCH_MULTIPLE_CASE_LABELS":
-                case "LOCAL_VARIABLE_TYPE_INFERENCE":
-                case "VAR_SYNTAX_IMPLICIT_LAMBDAS":
-                case "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION":
-                case "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES":
-                case "TEXT_BLOCKS":
-                case "PATTERN_MATCHING_IN_INSTANCEOF":
-                case "REIFIABLE_TYPES_INSTANCEOF":
-                case "RECORDS":
+                case "MODULES":               // Impossible: cannot make a module-info.java on Java 8
+                case "STRING_TEMPLATES":      // Not relevant: removed in Java 23 because of a confusing design
+                case "MODULE_IMPORTS":        // Impossible: needs the modules system
+                case "JAVA_BASE_TRANSITIVE":  // Impossible: needs the modules system
+                    break;
+                default:
                     //noinspection UnusedAssignment
                     source = Source.DEFAULT;
-                    break;
             }
         }
     }
 
     static class CheckSourceLevelAdvice {
-
         @Advice.OnMethodEnter
         static void checkSourceLevel(
                 @Advice.Argument(value = 1, readOnly = false) Source.Feature feature
@@ -181,9 +180,7 @@ public class JabelCompilerPlugin implements Plugin {
     }
 
     private static class FieldAccessStub extends AsmVisitorWrapper.AbstractBase {
-
         final String fieldName;
-
         final Object value;
 
         public FieldAccessStub(String fieldName, Object value) {
