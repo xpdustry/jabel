@@ -1,191 +1,163 @@
 package com.github.bsideup.jabel;
 
-import com.sun.source.tree.ClassTree;
-import com.sun.source.tree.CompilationUnitTree;
-import com.sun.source.util.TaskEvent;
-import com.sun.source.util.TaskListener;
-import com.sun.source.util.TreeScanner;
-import com.sun.tools.javac.code.*;
-import com.sun.tools.javac.tree.JCTree;
-import com.sun.tools.javac.tree.TreeMaker;
-import com.sun.tools.javac.util.*;
+import java.util.Iterator;
+import java.util.stream.*;
 
 import javax.lang.model.element.Modifier;
-import javax.tools.JavaFileObject;
-import java.util.Iterator;
-import java.util.stream.Stream;
 
-class RecordsRetrofittingTaskListener implements TaskListener {
+import com.sun.source.tree.*;
+import com.sun.source.util.*;
+import com.sun.source.util.TreeScanner;
+import com.sun.tools.javac.code.*;
+import com.sun.tools.javac.tree.*;
+import com.sun.tools.javac.tree.JCTree.*;
+import com.sun.tools.javac.util.*;
 
+
+/**
+ * Will generate {@code hashCode()}, {@code equals()} and {@code toString()}
+ * methods, and remove {@link Flags#RECORD}.
+ */
+public class RecordsRetrofittingTaskListener implements TaskListener {
     final TreeMaker make;
-
     final Symtab syms;
-
+    final Types types;
     final Names names;
-
-    final Log log;
-
-    TreeScanner<Void, Void> recordsScanner = new TreeScanner<Void, Void>() {
-        @Override
-        public Void visitClass(ClassTree node, Void aVoid) {
-            if (!"RECORD".equals(node.getKind().toString())) {
-                return super.visitClass(node, aVoid);
-            }
-
-            JCTree.JCClassDecl classDecl = (JCTree.JCClassDecl) node;
-
-            if (classDecl.extending == null) {
-                // Prevent implicit "extends java.lang.Record"
-                classDecl.extending = make.Type(syms.objectType);
-            }
-
-            {
-                Name methodName = names.toString;
-                List<Type> argTypes = List.nil();
-                if (!containsMethod(classDecl, methodName)) {
-                    JCTree.JCMethodDecl methodDecl = make.MethodDef(
-                            new Symbol.MethodSymbol(
-                                    Flags.PUBLIC,
-                                    methodName,
-                                    new Type.MethodType(
-                                            argTypes,
-                                            syms.stringType,
-                                            List.nil(),
-                                            syms.methodClass
-                                    ),
-                                    syms.objectType.tsym
-                            ),
-                            make.Block(0, generateToString(classDecl))
-                    );
-                    classDecl.defs = classDecl.defs.append(methodDecl);
-                }
-            }
-
-            {
-                Name methodName = names.hashCode;
-                List<Type> argTypes = List.nil();
-                if (!containsMethod(classDecl, methodName)) {
-                    classDecl.defs = classDecl.defs.append(make.MethodDef(
-                            new Symbol.MethodSymbol(
-                                    Flags.PUBLIC,
-                                    methodName,
-                                    new Type.MethodType(
-                                            argTypes,
-                                            syms.intType,
-                                            List.nil(),
-                                            syms.methodClass
-                                    ),
-                                    syms.objectType.tsym
-                            ),
-                            make.Block(0, generateHashCode(classDecl))
-                    ));
-                }
-            }
-
-            {
-                Name methodName = names.equals;
-                List<Type> argTypes = List.of(syms.objectType);
-                if (!containsMethod(classDecl, methodName)) {
-                    Symbol.MethodSymbol methodSymbol = new Symbol.MethodSymbol(
-                            Flags.PUBLIC | Flags.FINAL,
-                            methodName,
-                            new Type.MethodType(
-                                    argTypes,
-                                    syms.booleanType,
-                                    List.nil(),
-                                    syms.methodClass
-                            ),
-                            syms.objectType.tsym
-                    );
-                    Symbol.VarSymbol firstParameter = methodSymbol.params().head;
-
-                    JCTree.JCMethodDecl methodDecl = make.MethodDef(
-                            methodSymbol,
-                            make.Block(0, generateEquals(classDecl, firstParameter.name))
-                    );
-                    // THIS ONE IS IMPORTANT! Otherwise, Flow.AssignAnalyzer#visitVarDef will have track=false
-                    methodDecl.params.head.pos = classDecl.pos;
-                    classDecl.defs = classDecl.defs.append(methodDecl);
-                }
-            }
-            return super.visitClass(node, aVoid);
-        }
-
-        private boolean containsMethod(JCTree.JCClassDecl classDecl, Name name) {
-            return classDecl.defs.stream()
-                    .filter(JCTree.JCMethodDecl.class::isInstance)
-                    .map(JCTree.JCMethodDecl.class::cast)
-                    .anyMatch(def -> {
-                        if (def.getName() != name) {
-                            return false;
-                        }
-
-                        if (name == names.equals) {
-                            if (def.params.size() != 1) {
-                                return false;
-                            }
-
-                            // TODO find a better way?
-                            JCTree.JCVariableDecl param = def.params.get(0);
-                            switch (param.getType().toString()) {
-                                case "java.lang.Object":
-                                case "Object":
-                                    return true;
-                                default:
-                                    return false;
-                            }
-                        }
-
-                        return true;
-                    });
-        }
-    };
 
     public RecordsRetrofittingTaskListener(Context context) {
         make = TreeMaker.instance(context);
         syms = Symtab.instance(context);
+        types = Types.instance(context);
         names = Names.instance(context);
-        log = Log.instance(context);
     }
 
     @Override
     public void started(TaskEvent e) {
-        switch (e.getKind()) {
-            case ENTER:
-                recordsScanner.scan(e.getCompilationUnit(), null);
-                new TreeScanner<Void, Void>() {
-                    @Override
-                    public Void visitClass(ClassTree node, Void aVoid) {
-                        if ("RECORD".equals(node.getKind().toString())) {
-                            JCTree.JCClassDecl classDecl = (JCTree.JCClassDecl) node;
+        if (e.getKind() != TaskEvent.Kind.ENTER) return;
+        new RecordsScanner().scan(e.getCompilationUnit(), false);
+    }
 
-                            if (classDecl.extending == null) {
-                                // Prevent implicit "extends java.lang.Record"
-                                classDecl.extending = make.Type(syms.objectType);
-                            }
-                        }
-                        return super.visitClass(node, aVoid);
+    /** Remove {@link Flags#RECORD} to avoid invalid ASM reading. */
+    @Override
+    public void finished(TaskEvent e) {
+        if (e.getKind() != TaskEvent.Kind.ANALYZE) return;
+        new RecordsScanner().scan(e.getCompilationUnit(), true);
+    }
+
+    public class RecordsScanner extends TreeScanner<Void, Boolean> {
+        @Override
+        public Void visitClass(ClassTree node, Boolean endPhase) {
+            if ("RECORD".equals(node.getKind().toString())) {
+                JCClassDecl classDecl = (JCClassDecl) node;
+
+                if (endPhase != null && endPhase) {
+                    if (classDecl.sym != null) {
+                        classDecl.sym.flags_field &= ~Flags.RECORD;
                     }
-                }.scan(e.getCompilationUnit(), null);
-                break;
-            case ANALYZE:
-                new MandatoryDesugarAnnotationTreeScanner(log, e.getCompilationUnit()).scan(e.getCompilationUnit(), null);
+
+                } else {
+                    if (classDecl.extending == null) {
+                        // Prevent implicit "extends java.lang.Record"
+                        classDecl.extending = make.Type(syms.objectType);
+                    }
+                    generateToStringIfNeeded(classDecl);
+                    generateHashcodeIfNeeded(classDecl);
+                    generateEqualsIfNeeded(classDecl);
+                }
+            }
+            return super.visitClass(node, endPhase);
         }
     }
 
-    @Override
-    public void finished(TaskEvent e) {
+    public void generateToStringIfNeeded(JCClassDecl classDecl) {
+        if (containsMethod(classDecl, names.toString)) return;
+        classDecl.defs = classDecl.defs.append(make.MethodDef(
+                new Symbol.MethodSymbol(
+                        Flags.PUBLIC | Flags.FINAL,
+                        names.toString,
+                        new Type.MethodType(
+                                List.nil(),
+                                syms.stringType,
+                                List.nil(),
+                                syms.methodClass
+                        ),
+                        syms.objectType.tsym
+                ),
+                make.Block(0, generateToString(classDecl))
+        ));
     }
 
-    private Stream<JCTree.JCVariableDecl> getRecordComponents(JCTree.JCClassDecl classDecl) {
+    public void generateHashcodeIfNeeded(JCClassDecl classDecl) {
+        if (containsMethod(classDecl, names.hashCode)) return;
+        classDecl.defs = classDecl.defs.append(make.MethodDef(
+                new Symbol.MethodSymbol(
+                        Flags.PUBLIC | Flags.FINAL,
+                        names.hashCode,
+                        new Type.MethodType(
+                                List.nil(),
+                                syms.intType,
+                                List.nil(),
+                                syms.methodClass
+                        ),
+                        syms.objectType.tsym
+                ),
+                make.Block(0, generateHashCode(classDecl))
+        ));
+    }
+
+    public void generateEqualsIfNeeded(JCClassDecl classDecl) {
+        if (containsMethod(classDecl, names.equals)) return;
+        Symbol.MethodSymbol methodSymbol = new Symbol.MethodSymbol(
+                Flags.PUBLIC | Flags.FINAL,
+                names.equals,
+                new Type.MethodType(
+                        List.of(syms.objectType),
+                        syms.booleanType,
+                        List.nil(),
+                        syms.methodClass
+                ),
+                syms.objectType.tsym
+        );
+        JCTree.JCMethodDecl methodDecl = make.MethodDef(
+                methodSymbol,
+                make.Block(0, generateEquals(
+                        classDecl,
+                        methodSymbol.params().head.name
+                ))
+        );
+
+        // THIS ONE IS IMPORTANT! Otherwise, Flow.AssignAnalyzer#visitVarDef will have track=false
+        methodDecl.params.head.pos = classDecl.pos;
+        classDecl.defs = classDecl.defs.append(methodDecl);
+    }
+
+    /** Can only search for a method with no or one argument. */
+    private boolean containsMethod(JCClassDecl classDecl, Name name) {
+        for (JCTree next : classDecl.defs) {
+            if (!(next instanceof JCMethodDecl)) continue;
+            JCMethodDecl def = (JCMethodDecl) next;
+            if (def.getName() != name) continue;
+            if (name != names.equals) return true;
+            if (def.params.size() != 1) continue;
+            // TODO find a better way?
+            switch(def.params.get(0).getType().toString()){
+                case "java.lang.Object":
+                case "Object":
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    public Stream<JCVariableDecl> getRecordComponents(JCClassDecl classDecl) {
         return classDecl.getMembers().stream()
-                .filter(JCTree.JCVariableDecl.class::isInstance)
-                .map(JCTree.JCVariableDecl.class::cast)
-                .filter(it -> !it.getModifiers().getFlags().contains(Modifier.STATIC));
+                        .filter(JCVariableDecl.class::isInstance)
+                        .map(JCVariableDecl.class::cast)
+                        .filter(it -> !it.getModifiers().getFlags().contains(Modifier.STATIC));
     }
 
-    private List<JCTree.JCStatement> generateToString(JCTree.JCClassDecl classDecl) {
-        JCTree.JCExpression stringBuilder = make.NewClass(
+    public List<JCStatement> generateToString(JCClassDecl classDecl) {
+        JCExpression stringBuilder = make.NewClass(
                 null,
                 null,
                 make.QualIdent(syms.stringBuilderType.tsym),
@@ -194,302 +166,244 @@ class RecordsRetrofittingTaskListener implements TaskListener {
         );
 
         for (
-                Iterator<JCTree.JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
+                Iterator<JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
                 iterator.hasNext();
         ) {
-            JCTree.JCVariableDecl fieldDecl = iterator.next();
+            JCVariableDecl fieldDecl = iterator.next();
             Name fieldName = fieldDecl.name;
 
             stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
+                    make.Select(stringBuilder, names.append)
+                        .setType(syms.stringBuilderType),
                     List.of(make.Literal(fieldName + "="))
             );
 
             stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-                    List.of(
-                            make.Select(
-                                    make.This(Type.noType),
-                                    fieldName
-                            )
-                    )
+                    make.Select(stringBuilder, names.append)
+                        .setType(syms.stringBuilderType),
+                    List.of(make.Select(make.This(Type.noType), fieldName))
             );
 
-            if (iterator.hasNext()) {
-                stringBuilder = make.App(
-                        make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-                        List.of(make.Literal(","))
-                );
-            }
+            if (!iterator.hasNext()) break;
+            stringBuilder = make.App(
+                    make.Select(stringBuilder, names.append)
+                        .setType(syms.stringBuilderType),
+                    List.of(make.Literal(", "))
+            );
         }
 
         stringBuilder = make.App(
-                make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
+                make.Select(stringBuilder, names.append)
+                    .setType(syms.stringBuilderType),
                 List.of(make.Literal("]"))
         );
 
-        return List.of(make.Return(
-                make.App(
-                        make.Select(stringBuilder, names.toString).setType(syms.stringType)
-                )
-        ));
+        return List.of(make.Return(make.App(
+                make.Select(stringBuilder, names.toString)
+                    .setType(syms.stringType)
+        )));
     }
 
-    private List<JCTree.JCStatement> generateEquals(JCTree.JCClassDecl classDecl, Name otherName) {
-        ListBuffer<JCTree.JCStatement> statements = new ListBuffer<>();
+    public List<JCStatement> generateEquals(JCClassDecl classDecl, Name otherName) {
+        ListBuffer<JCStatement> statements = new ListBuffer<>();
 
         // if (o == this) return true;
-        {
-            statements.add(make.If(
-                    make.Binary(
-                            JCTree.Tag.EQ,
-                            make.This(Type.noType),
-                            make.Ident(otherName)
-                    ),
-                    make.Return(make.Literal(true)),
-                    null
-            ));
-        }
+        statements.add(make.If(
+                make.Binary(
+                        Tag.EQ,
+                        make.This(Type.noType),
+                        make.Ident(otherName)
+                ),
+                make.Return(make.Literal(true)),
+                null
+        ));
 
         // if (o == null) return false;
-        {
-            statements.add(make.If(
-                    make.Binary(
-                            JCTree.Tag.EQ,
-                            make.Ident(otherName),
-                            make.Literal(TypeTag.BOT, null)
-                    ),
-                    make.Return(make.Literal(false)),
-                    null
-            ));
-        }
+        statements.add(make.If(
+                make.Binary(
+                        Tag.EQ,
+                        make.Ident(otherName),
+                        make.Literal(TypeTag.BOT, null)
+                ),
+                make.Return(make.Literal(false)),
+                null
+        ));
 
         // if (o.getClass() != getClass()) return false;
-        {
+        statements.add(make.If(
+                make.Binary(
+                        Tag.EQ,
+                        make.App(make.Select(
+                                make.Ident(otherName),
+                                names.getClass
+                        ).setType(syms.classType)),
+                        make.App(make.Select(
+                                make.This(Type.noType),
+                                names.getClass
+                        ).setType(syms.classType))
+                ),
+                make.Block(0, List.nil()),
+                make.Return(make.Literal(false))
+        ));
+
+        // Create casted variable: ClassName other = (ClassName)o;
+        Name thatName = names.fromString("other");
+        statements.add(make.VarDef(
+                make.Modifiers(0L),
+                thatName,
+                make.Ident(classDecl.name),
+                make.TypeCast(make.Ident(classDecl.name), make.Ident(otherName))
+        ));
+
+        // fields - use the casted variable
+        for (
+                Iterator<JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
+                iterator.hasNext();
+        ) {
+            JCVariableDecl fieldDecl = iterator.next();
+            JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
+            JCExpression otherFieldAccess = make.Select(make.Ident(thatName), fieldDecl.name);
+
+            final JCExpression condition;
+            if (fieldDecl.getType() instanceof JCPrimitiveTypeTree) {
+                condition = make.Binary(Tag.EQ, otherFieldAccess, myFieldAccess);
+            } else {
+                condition = make.App(
+                        // call Objects.equals
+                        make.Select(
+                                make.QualIdent(syms.objectsType.tsym),
+                                names.equals
+                        ).setType(syms.objectsType),
+                        List.of(otherFieldAccess, myFieldAccess)
+                );
+            }
             statements.add(make.If(
-                    make.Binary(
-                            JCTree.Tag.EQ,
-                            make.App(make.Select(make.Ident(otherName), names.getClass).setType(syms.classType)),
-                            make.App(make.Select(make.This(Type.noType), names.getClass).setType(syms.classType))
-                    ),
+                    condition,
                     make.Block(0, List.nil()),
                     make.Return(make.Literal(false))
             ));
         }
 
-        // fields
-        {
-            for (
-                    Iterator<JCTree.JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
-                    iterator.hasNext();
-            ) {
-                JCTree.JCVariableDecl fieldDecl = iterator.next();
-
-                JCTree.JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
-                JCTree.JCExpression otherFieldAccess = make.Select(
-                        make.TypeCast(make.Ident(classDecl.name), make.Ident(otherName)),
-                        fieldDecl.name
-                );
-
-                final JCTree.JCExpression condition;
-                if (fieldDecl.getType() instanceof JCTree.JCPrimitiveTypeTree) {
-                    condition = make.Binary(JCTree.Tag.EQ, otherFieldAccess, myFieldAccess);
-                } else {
-                    condition = make.App(
-                            // call Objects.equals
-                            make.Select(
-                                    make.QualIdent(syms.objectsType.tsym),
-                                    names.equals
-                            ).setType(syms.objectsType),
-                            List.of(otherFieldAccess, myFieldAccess)
-                    );
-                }
-                statements.add(make.If(
-                        condition,
-                        make.Block(0, List.nil()),
-                        make.Return(make.Literal(false))
-                ));
-            }
-        }
-
+        // return true;
         statements.add(make.Return(make.Literal(true)));
+
         return statements.toList();
     }
 
-    private List<JCTree.JCStatement> generateHashCode(JCTree.JCClassDecl classDecl) {
-        ListBuffer<JCTree.JCExpression> expressions = new ListBuffer<>();
+    public List<JCStatement> generateHashCode(JCClassDecl classDecl) {
+        ListBuffer<JCExpression> expressions = new ListBuffer<>();
 
         for (
-                Iterator<JCTree.JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
+                Iterator<JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
                 iterator.hasNext();
         ) {
-            JCTree.JCVariableDecl fieldDecl = iterator.next();
+            JCVariableDecl fieldDecl = iterator.next();
 
             JCTree fType = fieldDecl.getType();
+            JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
 
-            JCTree.JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
-
-            if (fType instanceof JCTree.JCPrimitiveTypeTree) {
-                switch (((JCTree.JCPrimitiveTypeTree) fType).getPrimitiveTypeKind()) {
+            if (fType instanceof JCPrimitiveTypeTree) {
+                switch (((JCPrimitiveTypeTree) fType).getPrimitiveTypeKind()) {
                     case BOOLEAN:
                         /* this.fieldName ? 1 : 0 */
-                        expressions.append(
-                                make.Conditional(
-                                        myFieldAccess,
-                                        make.Literal(TypeTag.INT, 1),
-                                        make.Literal(TypeTag.INT, 0)
-                                )
-                        );
+                        expressions.append(make.Conditional(
+                                myFieldAccess,
+                                make.Literal(TypeTag.INT, 1),
+                                make.Literal(TypeTag.INT, 0)
+                        ));
                         break;
+
                     case LONG:
-                        expressions.append(longToIntForHashCode(myFieldAccess));
+                        expressions.append(make.TypeCast(
+                                make.TypeIdent(syms.intType.getTag()),
+                                make.Parens(make.Binary(
+                                            Tag.BITXOR,
+                                            myFieldAccess,
+                                            make.Parens(make.Binary(
+                                                    Tag.USR,
+                                                    myFieldAccess,
+                                                    make.Literal(32)
+                                            ))
+                                ))
+                        ));
                         break;
+
                     case FLOAT:
                         /* this.fieldName != 0f ? Float.floatToIntBits(this.fieldName) : 0 */
-                        expressions.append(
-                                make.Conditional(
-                                        make.Binary(JCTree.Tag.NE, myFieldAccess, make.Literal(0f)),
-                                        make.App(
-                                                make.Select(
-                                                        make.Ident(names.fromString("Float")),
-                                                        names.fromString("floatToIntBits")).setType(syms.intType),
-                                                List.of(myFieldAccess)
-                                        ),
-                                        make.Literal(TypeTag.INT, 0)
-                                )
-                        );
+                        expressions.append(make.Conditional(
+                                make.Binary(Tag.NE, myFieldAccess, make.Literal(0f)),
+                                make.App(
+                                        make.Select(
+                                                make.QualIdent(types.boxedClass(syms.floatType)),
+                                                names.fromString("floatToIntBits")
+                                        ).setType(syms.intType),
+                                        List.of(myFieldAccess)
+                                ),
+                                make.Literal(TypeTag.INT, 0)
+                        ));
                         break;
+
                     case DOUBLE:
-                        /* longToIntForHashCode(Double.doubleToLongBits(this.fieldName)) */
-                        expressions.append(
-                                longToIntForHashCode(
-                                        make.App(
-                                                make.Select(
-                                                        make.Ident(names.fromString("Double")),
-                                                        names.fromString("doubleToLongBits")).setType(syms.intType),
-                                                List.of(myFieldAccess)
-                                        )
-                                )
-                        );
+                        /* Double.hashCode(this.fieldName) */
+                        expressions.append(make.App(
+                                make.Select(
+                                        make.QualIdent(types.boxedClass(syms.doubleType)),
+                                        names.hashCode
+                                ).setType(syms.intType),
+                                List.of(myFieldAccess)
+                        ));
                         break;
-                    default:
+
                     case BYTE:
                     case SHORT:
                     case INT:
                     case CHAR:
+                    default:
                         /* just the field */
                         expressions.append(myFieldAccess);
                         break;
                 }
-            } else if (fType instanceof JCTree.JCArrayTypeTree) {
-                expressions.append(
-                        make.App(
-                                make.Select(
-                                        make.Select(
-                                                make.Select(
-                                                        make.Ident(names.fromString("java")),
-                                                        names.fromString("util")
-                                                ),
-                                                names.fromString("Arrays")
-                                        ),
-                                        names.fromString("hashCode")
-                                ).setType(syms.intType),
-                                List.of(myFieldAccess)
-                        )
-                );
+
+            } else if (fType instanceof JCArrayTypeTree) {
+                expressions.append(make.App(
+                        make.Select(
+                                make.QualIdent(syms.arraysType.tsym),
+                                names.hashCode
+                        ).setType(syms.intType),
+                        List.of(myFieldAccess)
+                ));
             } else {
                 /* (this.fieldName != null ? this.fieldName.hashCode() : 0) */
-                expressions.append(
-                        make.Conditional(
-                                make.Binary(JCTree.Tag.NE, myFieldAccess, make.Literal(TypeTag.BOT, null)),
-                                make.App(make.Select(myFieldAccess, names.hashCode).setType(syms.intType)),
-                                make.Literal(0)
-                        )
-                );
+                expressions.append(make.Conditional(
+                        make.Binary(Tag.NE, myFieldAccess, make.Literal(TypeTag.BOT, null)),
+                        make.App(make.Select(myFieldAccess, names.hashCode).setType(syms.intType)),
+                        make.Literal(0)
+                ));
             }
         }
 
-        ListBuffer<JCTree.JCStatement> statements = new ListBuffer<>();
-
+        ListBuffer<JCStatement> statements = new ListBuffer<>();
         Name resultName = names.fromString("result");
+        statements.append(make.VarDef(
+                make.Modifiers(0L),
+                resultName,
+                make.TypeIdent(syms.intType.getTag()),
+                make.Literal(0)
+        ));
 
-        statements.append(
-                make.VarDef(
-                        make.Modifiers(0L),
-                        resultName,
-                        make.TypeIdent(syms.intType.getTag()),
-                        make.Literal(0)
-                )
-        );
-        for (JCTree.JCExpression expression : expressions) {
+        for (JCExpression expression : expressions) {
             // result = 31 * result + ${expr}
-            statements.append(make.Exec(
-                    make.Assign(
-                            make.Ident(resultName),
-                            make.Binary(
-                                    JCTree.Tag.PLUS,
-                                    make.Binary(JCTree.Tag.MUL, make.Literal(TypeTag.INT, 31), make.Ident(resultName)),
-                                    expression
-                            )
+            statements.append(make.Exec(make.Assign(
+                    make.Ident(resultName),
+                    make.Binary(
+                            Tag.PLUS,
+                            make.Binary(Tag.MUL, make.Literal(TypeTag.INT, 31), make.Ident(resultName)),
+                            expression
                     )
-            ));
+            )));
         }
 
         statements.append(make.Return(make.Ident(resultName)));
         return statements.toList();
-    }
-
-    public JCTree.JCExpression longToIntForHashCode(JCTree.JCExpression ref) {
-        /* (int) (ref ^ ref >>> 32) */
-        return make.TypeCast(
-                make.TypeIdent(syms.intType.getTag()),
-                make.Parens(
-                        make.Binary(
-                                JCTree.Tag.BITXOR,
-                                ref,
-                                make.Parens(make.Binary(JCTree.Tag.USR, ref, make.Literal(32)))
-                        )
-                )
-        );
-    }
-
-    private static class MandatoryDesugarAnnotationTreeScanner extends TreeScanner<Void, Void> {
-
-        private final Log log;
-
-        private final CompilationUnitTree compilationUnit;
-
-        public MandatoryDesugarAnnotationTreeScanner(Log log, CompilationUnitTree compilationUnit) {
-            this.log = log;
-            this.compilationUnit = compilationUnit;
-        }
-
-        @Override
-        public Void visitClass(ClassTree node, Void aVoid) {
-            if ("RECORD".equals(node.getKind().toString())) {
-                if (
-                        node.getModifiers().getAnnotations().stream()
-                                .noneMatch(annotation -> {
-                                    Type type = ((JCTree.JCAnnotation) annotation).type;
-                                    return Desugar.class.getName().equals(type.toString());
-                                })
-                ) {
-                    JavaFileObject oldSource = log.useSource(compilationUnit.getSourceFile());
-                    try {
-                        log.error(
-                                (JCTree.JCClassDecl) node,
-                                new JCDiagnostic.Error(
-                                        "jabel",
-                                        "missing.desugar.on.record",
-                                        "Must be annotated with @Desugar"
-                                )
-                        );
-                    } finally {
-                        log.useSource(oldSource);
-                    }
-                }
-            }
-            return super.visitClass(node, aVoid);
-        }
     }
 }

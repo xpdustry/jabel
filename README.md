@@ -1,4 +1,4 @@
-# Jabel - use modern Java 9-14 syntax when targeting Java 8
+# Jabel - use modern Java 9-25 syntax when targeting Java 8
 
 > Because life is too short to wait for your users to upgrade their Java!
 
@@ -74,8 +74,8 @@ Jabel has to be enabled as a Javac plugin in your maven-compiler-plugin:
                 <configuration>
                     <!-- Make sure we're not using Java 9+ APIs -->
                     <release>8</release>
-                    <source>14</source>
-                    <target>14</target>
+                    <source>25</source>
+                    <target>25</target>
                     <!-- The following setting can be avoided on Java 14 and higher -->
                     <compilerArgs>
                         <arg>-Xplugin:jabel</arg>

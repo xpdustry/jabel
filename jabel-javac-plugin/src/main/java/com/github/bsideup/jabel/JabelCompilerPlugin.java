@@ -4,8 +4,8 @@ import com.sun.source.util.JavacTask;
 import com.sun.source.util.Plugin;
 import com.sun.tools.javac.api.BasicJavacTask;
 import com.sun.tools.javac.code.Source;
-import com.sun.tools.javac.util.Context;
-import com.sun.tools.javac.util.JavacMessages;
+import com.sun.tools.javac.util.*;
+
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.agent.ByteBuddyAgent;
 import net.bytebuddy.asm.Advice;
@@ -29,34 +29,42 @@ import java.util.*;
 
 import static net.bytebuddy.matcher.ElementMatchers.*;
 
+
 public class JabelCompilerPlugin implements Plugin {
     static {
+        boolean c = false;
+        try {
+            Class.forName("com.sun.tools.javac.code.Source$Feature");
+            c = true;
+        } catch (Exception e) {}
+        final boolean canPatchSources = c;
+
         Map<String, AsmVisitorWrapper> visitors = new HashMap<String, AsmVisitorWrapper>() {{
-            // Disable the preview feature check
-            AsmVisitorWrapper checkSourceLevelAdvice = Advice.to(CheckSourceLevelAdvice.class)
-                    .on(named("checkSourceLevel").and(takesArguments(2)));
+            if (canPatchSources) {
+                // Disable the preview feature check
+                AsmVisitorWrapper checkSourceLevelAdvice = Advice.to(CheckSourceLevelAdvice.class)
+                        .on(named("checkSourceLevel").and(takesArguments(2)));
 
-            // Allow features that were introduced together with Records (local enums, static inner members, ...)
-            AsmVisitorWrapper allowRecordsEraFeaturesAdvice = new FieldAccessStub("allowRecords", true);
+                // Allow features that were introduced together with Records (local enums, static inner members, ...)
+                AsmVisitorWrapper allowRecordsEraFeaturesAdvice = new FieldAccessStub("allowRecords", true);
 
-            put("com.sun.tools.javac.parser.JavacParser",
-                    new AsmVisitorWrapper.Compound(
-                            checkSourceLevelAdvice,
-                            allowRecordsEraFeaturesAdvice
-                    )
-            );
-            put("com.sun.tools.javac.parser.JavaTokenizer", checkSourceLevelAdvice);
+                put("com.sun.tools.javac.parser.JavacParser",
+                        new AsmVisitorWrapper.Compound(
+                                checkSourceLevelAdvice,
+                                allowRecordsEraFeaturesAdvice
+                        )
+                );
+                put("com.sun.tools.javac.parser.JavaTokenizer", checkSourceLevelAdvice);
 
-            put("com.sun.tools.javac.comp.Check", allowRecordsEraFeaturesAdvice);
-            put("com.sun.tools.javac.comp.Attr", allowRecordsEraFeaturesAdvice);
-            put("com.sun.tools.javac.comp.Resolve", allowRecordsEraFeaturesAdvice);
+                put("com.sun.tools.javac.comp.Check", allowRecordsEraFeaturesAdvice);
+                put("com.sun.tools.javac.comp.Attr", allowRecordsEraFeaturesAdvice);
+                put("com.sun.tools.javac.comp.Resolve", allowRecordsEraFeaturesAdvice);
 
-            // Lower the source requirement for supported features
-            put(
-                    "com.sun.tools.javac.code.Source$Feature",
-                    Advice.to(AllowedInSourceAdvice.class)
-                            .on(named("allowedInSource").and(takesArguments(1)))
-            );
+                // Lower the source requirement for supported features
+                AsmVisitorWrapper allowedInSourceAdvice = Advice.to(AllowedInSourceAdvice.class)
+                        .on(named("allowedInSource").and(takesArguments(1)));
+                put("com.sun.tools.javac.code.Source$Feature", allowedInSourceAdvice);
+            }
         }};
 
         try {
@@ -92,41 +100,40 @@ public class JabelCompilerPlugin implements Plugin {
                     .load(classLoader, ClassReloadingStrategy.fromInstalledAgent());
         });
 
-        JavaModule jabelModule = JavaModule.ofType(JabelCompilerPlugin.class);
-        ClassInjector.UsingInstrumentation.redefineModule(
-                ByteBuddyAgent.getInstrumentation(),
-                JavaModule.ofType(JavacTask.class),
-                Collections.emptySet(),
-                Collections.emptyMap(),
-                new HashMap<String, java.util.Set<JavaModule>>() {{
-                    put("com.sun.tools.javac.api", Collections.singleton(jabelModule));
-                    put("com.sun.tools.javac.tree", Collections.singleton(jabelModule));
-                    put("com.sun.tools.javac.code", Collections.singleton(jabelModule));
-                    put("com.sun.tools.javac.util", Collections.singleton(jabelModule));
-                }},
-                Collections.emptySet(),
-                Collections.emptyMap()
-        );
+        try {
+            JavaModule jabelModule = JavaModule.ofType(JabelCompilerPlugin.class);
+            ClassInjector.UsingInstrumentation.redefineModule(
+                    ByteBuddyAgent.getInstrumentation(),
+                    JavaModule.ofType(JavacTask.class),
+                    Collections.emptySet(),
+                    Collections.emptyMap(),
+                    new HashMap<String, java.util.Set<JavaModule>>() {{
+                        put("com.sun.tools.javac.api", Collections.singleton(jabelModule));
+                        put("com.sun.tools.javac.tree", Collections.singleton(jabelModule));
+                        put("com.sun.tools.javac.code", Collections.singleton(jabelModule));
+                        put("com.sun.tools.javac.comp", Collections.singleton(jabelModule));
+                        put("com.sun.tools.javac.util", Collections.singleton(jabelModule));
+                    }},
+                    Collections.emptySet(),
+                    Collections.emptyMap()
+            );
+        // In case of we are running on Java 8
+        } catch (NullPointerException ignored) {}
     }
 
     @Override
     public void init(JavacTask task, String... args) {
         Context context = ((BasicJavacTask) task).getContext();
-        JavacMessages.instance(context).add(locale -> new ResourceBundle() {
-            @Override
-            protected Object handleGetObject(String key) {
-                return "{0}";
-            }
-
-            @Override
-            public Enumeration<String> getKeys() {
-                return Collections.enumeration(Arrays.asList("missing.desugar.on.record"));
-            }
-        });
+        removeUnderscoreWarnings(context);
 
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
-
-        System.out.println("Jabel: initialized");
+        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
+        task.addTaskListener(new SwitchRetrofittingTaskListener(context));
+        try {
+            task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
+        // Because JCDiagnostic.Warning doesn't exists on Java 8. But we don't care at this point
+        } catch (NoClassDefFoundError ignored) {}
+        task.addTaskListener(new ImplicitClassesFixerTaskListener(context));
     }
 
     @Override
@@ -134,40 +141,46 @@ public class JabelCompilerPlugin implements Plugin {
         return "jabel";
     }
 
-    // Make it auto start on Java 14+
+    /** Make it auto starts on Java 14+. */
     public boolean autoStart() {
         return true;
     }
 
-    static class AllowedInSourceAdvice {
+    /** Removes warnings about {@code '_'}. */
+    private static void removeUnderscoreWarnings(Context context) {
+        // Need to inherit a class instead.
+        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) on Java 16-
+        Log.instance(context).new DiscardDiagnosticHandler() {
+            @Override
+            public void report(JCDiagnostic diag) {
+                String code = diag.getCode();
+                if (code.contains("underscore.as.identifier") ||
+                    code.contains("use.of.underscore.not.allowed")) return;
+                prev.report(diag);
+            }
+        };
+    }
 
+    static class AllowedInSourceAdvice {
         @Advice.OnMethodEnter
         static void allowedInSource(
                 @Advice.This Source.Feature feature,
                 @Advice.Argument(value = 0, readOnly = false) Source source
         ) {
             switch (feature.name()) {
-                case "PRIVATE_SAFE_VARARGS":
-                case "SWITCH_EXPRESSION":
-                case "SWITCH_RULE":
-                case "SWITCH_MULTIPLE_CASE_LABELS":
-                case "LOCAL_VARIABLE_TYPE_INFERENCE":
-                case "VAR_SYNTAX_IMPLICIT_LAMBDAS":
-                case "DIAMOND_WITH_ANONYMOUS_CLASS_CREATION":
-                case "EFFECTIVELY_FINAL_VARIABLES_IN_TRY_WITH_RESOURCES":
-                case "TEXT_BLOCKS":
-                case "PATTERN_MATCHING_IN_INSTANCEOF":
-                case "REIFIABLE_TYPES_INSTANCEOF":
-                case "RECORDS":
+                case "MODULES":               // Extremely difficult as initialization is done very early
+                case "STRING_TEMPLATES":      // Appeared on Java 21 and removed on Java 23 because of a confusing design
+                case "MODULE_IMPORTS":        // Needs the modules system
+                case "JAVA_BASE_TRANSITIVE":  // Needs the modules system
+                    break;
+                default:
                     //noinspection UnusedAssignment
                     source = Source.DEFAULT;
-                    break;
             }
         }
     }
 
     static class CheckSourceLevelAdvice {
-
         @Advice.OnMethodEnter
         static void checkSourceLevel(
                 @Advice.Argument(value = 1, readOnly = false) Source.Feature feature
@@ -181,9 +194,7 @@ public class JabelCompilerPlugin implements Plugin {
     }
 
     private static class FieldAccessStub extends AsmVisitorWrapper.AbstractBase {
-
         final String fieldName;
-
         final Object value;
 
         public FieldAccessStub(String fieldName, Object value) {

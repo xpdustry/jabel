@@ -21,7 +21,7 @@ public class RecordExampleTest {
         RecordExample r = new RecordExample(42, "yeah", 100500, 0.5f, 5d, new String[]{"Hello", "World!"}, true);
 
         assertEquals(
-                "RecordExample[i=42,s=yeah,l=100500,f=0.5,d=5.0,arr=[Ljava.lang.String;@hash,b=true]",
+                "RecordExample[i=42, s=yeah, l=100500, f=0.5, d=5.0, arr=[Ljava.lang.String;@hash, b=true]",
                 Objects.toString(r).replaceAll(";@[a-f0-9]+", ";@hash")
         );
     }
@@ -31,7 +31,7 @@ public class RecordExampleTest {
         RecordExample r = new RecordExample(42, null, 100500, 0.5f, 5d, null, true);
 
         assertEquals(
-                "RecordExample[i=42,s=null,l=100500,f=0.5,d=5.0,arr=null,b=true]",
+                "RecordExample[i=42, s=null, l=100500, f=0.5, d=5.0, arr=null, b=true]",
                 Objects.toString(r)
         );
     }
