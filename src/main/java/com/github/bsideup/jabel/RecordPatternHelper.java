@@ -44,7 +44,9 @@ class RecordPatternHelper{
      * Like that, the class initialization error can be catched easily.
      */
     private static final class PatternCaseLabelAccess{
-        static JCTree pat(JCTree label){ return ((JCPatternCaseLabel)label).pat; }
+        static JCTree pat(JCTree label){
+            return ((JCPatternCaseLabel)label).pat;
+        }
     }
 
     /** Get the binding variable from a pattern (binding pattern or pattern case label). */

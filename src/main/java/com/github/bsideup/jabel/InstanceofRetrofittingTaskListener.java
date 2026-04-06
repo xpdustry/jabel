@@ -1,6 +1,5 @@
 package com.github.bsideup.jabel;
 
-import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
@@ -30,39 +29,37 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
     @Override
     public void started(TaskEvent e){
         if(e.getKind() != TaskEvent.Kind.ENTER) return;
-        CompilationUnitTree cu = e.getCompilationUnit();
-        if(!(cu instanceof JCCompilationUnit)) return;
-        new TreeTranslator(){
-            @Override
-            public <T extends JCTree> T translate(T tree){
-                if(tree == null) return null;
-                helper.collectRecord(tree);
-                if(tree instanceof JCIf) {
-                    JCIf ifStmt = (JCIf)tree;
-                    JCExpression cond = unwrapParenthesis(ifStmt.cond);
-                    if(!(cond instanceof JCInstanceOf)) return super.translate(tree);
+        if(!(e.getCompilationUnit() instanceof JCCompilationUnit)) return;
+        new InstanceofTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
+    }
 
-                    JCInstanceOf instanceOf = (JCInstanceOf)cond;
-                    JCTree pattern = instanceOf.pattern;
-                    if(pattern == null) return super.translate(tree);
 
-                    if(isRecordPattern(pattern)){
-                        transformRecordPattern(ifStmt, instanceOf, pattern);
-                    }else if(isBindingPattern(pattern)){
-                        transformBindingPattern(ifStmt, instanceOf, pattern);
-                    }
+    public class InstanceofTranslator extends TreeTranslator{
+        @Override
+        public <T extends JCTree> T translate(T tree){
+            if(tree == null) return null;
+            helper.collectRecord(tree);
+            if(tree instanceof JCIf) {
+                JCIf ifStmt = (JCIf)tree;
+                JCExpression cond = unwrapParenthesis(ifStmt.cond);
+                if(!(cond instanceof JCInstanceOf)) return super.translate(tree);
+
+                JCInstanceOf instanceOf = (JCInstanceOf)cond;
+                JCTree pattern = instanceOf.pattern;
+                if(pattern == null) return super.translate(tree);
+
+                if(isRecordPattern(pattern)){
+                    transformRecordPattern(ifStmt, instanceOf, pattern);
+                }else if(isBindingPattern(pattern)){
+                    transformBindingPattern(ifStmt, instanceOf, pattern);
                 }
-                return super.translate(tree);
             }
-        }.translate((JCCompilationUnit)cu);
+            return super.translate(tree);
+        }
     }
 
-    @Override
-    public void finished(TaskEvent e){
 
-    }
-
-    public static JCExpression unwrapParenthesis(JCExpression expr){
+    public JCExpression unwrapParenthesis(JCExpression expr){
         while(expr instanceof JCParens) expr = ((JCParens)expr).expr;
         return expr;
     }

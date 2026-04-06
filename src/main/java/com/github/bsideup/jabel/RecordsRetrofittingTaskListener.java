@@ -14,6 +14,8 @@ import java.util.Iterator;
 import java.util.stream.*;
 
 
+/** Will generate {@code hashCode()}, {@code equals()} and {@code toString()} methods,
+ *  and remove {@link Flags#RECORD}. */
 class RecordsRetrofittingTaskListener implements TaskListener{
     final Context context;
     final TreeMaker make;
@@ -32,42 +34,40 @@ class RecordsRetrofittingTaskListener implements TaskListener{
     @Override
     public void started(TaskEvent e){
         if(e.getKind() != TaskEvent.Kind.ENTER) return;
-        new TreeScanner<Void, Void>(){
-            @Override
-            public Void visitClass(ClassTree node, Void aVoid){
-                if("RECORD".equals(node.getKind().toString())){
-                    JCClassDecl classDecl = (JCClassDecl)node;
+        new RecordsScanner().scan(e.getCompilationUnit(), false);
+    }
+
+    /** Remove {@link Flags#RECORD} to avoid invalid ASM reading. */
+    @Override
+    public void finished(TaskEvent e){
+        if(e.getKind() != TaskEvent.Kind.ANALYZE) return;
+        new RecordsScanner().scan(e.getCompilationUnit(), true);
+    }
+
+
+    public class RecordsScanner extends TreeScanner<Void, Boolean>{
+        @Override
+        public Void visitClass(ClassTree node, Boolean endPhase){
+            if("RECORD".equals(node.getKind().toString())){
+                JCClassDecl classDecl = (JCClassDecl)node;
+
+                if(endPhase != null && endPhase){
+                    if(classDecl.sym != null) classDecl.sym.flags_field &= ~Flags.RECORD;
+
+                }else{
                     if(classDecl.extending == null){
                         // Prevent implicit "extends java.lang.Record"
                         classDecl.extending = make.Type(syms.objectType);
                     }
-
                     generateToStringIfNeeded(classDecl);
                     generateHashcodeIfNeeded(classDecl);
                     generateEqualsIfNeeded(classDecl);
                 }
-                return super.visitClass(node, aVoid);
             }
-        }.scan(e.getCompilationUnit(), null);
+            return super.visitClass(node, endPhase);
+        }
     }
 
-    /** Remove RECORD flag to avoid invalid ASM reading */
-    @Override
-    public void finished(TaskEvent e){
-        if(e.getKind() != TaskEvent.Kind.ANALYZE) return;
-        new TreeScanner<Void, Void>(){
-            @Override
-            public Void visitClass(ClassTree node, Void aVoid){
-                if("RECORD".equals(node.getKind().toString())){
-                    JCClassDecl classDecl = (JCClassDecl)node;
-                    if(classDecl.sym != null){
-                        classDecl.sym.flags_field &= ~Flags.RECORD;
-                    }
-                }
-                return super.visitClass(node, aVoid);
-            }
-        }.scan(e.getCompilationUnit(), null);
-    }
 
     public void generateToStringIfNeeded(JCClassDecl classDecl) {
         if(containsMethod(classDecl, names.toString)) return;

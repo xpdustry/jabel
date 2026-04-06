@@ -111,10 +111,14 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     // Because the return type of these two methods may not exist, we need delay the call to an inner class.
     // Like that, the class initialization error can be catched easily.
     private static final class DefaultCaseLabelFactory{
-        static JCTree make(TreeMaker m){ return m.DefaultCaseLabel(); }
+        static JCTree make(TreeMaker m){
+            return m.DefaultCaseLabel();
+        }
     }
     private static final class ConstantCaseLabelFactory{
-        static JCTree make(TreeMaker m, JCExpression lit){ return m.ConstantCaseLabel(lit); }
+        static JCTree make(TreeMaker m, JCExpression lit){
+            return m.ConstantCaseLabel(lit);
+        }
     }
 
     /** Create a default case label. Returns null if unsupported (JDK < 17). */
@@ -227,13 +231,8 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         new SwitchTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
     }
 
-    @Override
-    public void finished(TaskEvent e){
 
-    }
-
-
-    private class SwitchTranslator extends TreeTranslator{
+    public class SwitchTranslator extends TreeTranslator{
         private final Map<JCSwitchExpression, JCExpression> captures = new HashMap<>();
 
         @Override
@@ -348,8 +347,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
      * @param expression whether to build a switch expression or statement
      * @param rawSel original selector to inject as a capture, or {@code null}
      */
-    public JCSwitch transformSwitch(JCExpression sel, List<JCCase> cases, boolean expression,
-                                    JCExpression rawSel){
+    public JCSwitch transformSwitch(JCExpression sel, List<JCCase> cases, boolean expression, JCExpression rawSel){
         java.util.List<JCCase> nonDefs = new ArrayList<>();
         JCCase defCase = null;
         for(JCCase c : cases){
@@ -369,7 +367,8 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                 // Replace the first reference to the selector ident with (sv = rawSel).
                 final boolean[] done = {false};
                 cond = new TreeTranslator(){
-                    @Override public void visitIdent(JCIdent id){
+                    @Override
+                    public void visitIdent(JCIdent id){
                         if(!done[0] && id.name == selName){
                             done[0] = true;
                             result  = make.Parens(make.Assign(make.Ident(selName), rawSel));
@@ -603,6 +602,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         return make.VarDef(make.Modifiers(Flags.FINAL), name, type, init);
     }
 
+    //TODO: explain expected cases?
     private JCStatement makeMatchExceptionThrow(){
         return make.Throw(make.NewClass(
             null,

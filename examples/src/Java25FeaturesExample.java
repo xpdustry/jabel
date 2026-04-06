@@ -1,5 +1,9 @@
 // Examples made by Claude Opus 4.6
 
+import module java.base;
+import module java.desktop;
+
+
 /**
  * Examples of Java 25 flexible constructors with manual desugaring: <br>
  *
@@ -32,6 +36,7 @@ public class Java25FeaturesExample {
     // A warning will appear for signature duplication
     void main(String[] args) {
         str = "test";
+        new Point();
     }
 
     void main() {

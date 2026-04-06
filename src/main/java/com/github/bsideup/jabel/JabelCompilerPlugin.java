@@ -35,7 +35,7 @@ public class JabelCompilerPlugin implements Plugin{
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
         task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
-        task.addTaskListener(new ImplicitClassRetrofittingTaskListener(context));
+        task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
     }
 
     @Override
@@ -48,11 +48,11 @@ public class JabelCompilerPlugin implements Plugin{
         return true;
     }
 
-    private static void forceSourceFeatures() {
+    static void forceSourceFeatures(){
         // We cannot easily force features bellow Java 10.35
-        try {
+        try{
             Class.forName("com.sun.tools.javac.code.Source$Feature");
-        }catch(Throwable ignored) {
+        }catch(Throwable ignored){
             return;
         }
 
@@ -81,11 +81,11 @@ public class JabelCompilerPlugin implements Plugin{
     }
 
     /**
-     * Several compiler components cache {@code Feature.allowedInSource()} results. <br>
+     * Several compiler components cache {@link Source.Feature#allowedInSource()} results. <br>
      * Since these objects may be created <em>before</em> Jabel,
      * this method will try to force all {@code allow*} fields to {@code true}.
      */
-    private static void patchCachedFeatures(Context context){
+    static void patchCachedFeatures(Context context){
         Object[] comps = {
             Attr.instance(context),
             Check.instance(context),
@@ -103,10 +103,10 @@ public class JabelCompilerPlugin implements Plugin{
     }
 
     /** Removes warnings about {@code '_'}. */
-    private static void removeUnderscoreWarnings(Context context) {
+    static void removeUnderscoreWarnings(Context context){
         // Need to inherit a class instead.
         // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) on Java 16-
-        Log.instance(context).new DiscardDiagnosticHandler() {
+        Log.instance(context).new DiscardDiagnosticHandler(){
             @Override
             public void report(JCDiagnostic diag){
                 String code = diag.getCode();
@@ -117,10 +117,10 @@ public class JabelCompilerPlugin implements Plugin{
         };
     }
 
-    private static boolean patchPreview(Context context){
-        try {
+    static boolean patchPreview(Context context){
+        try{
             Class.forName("com.sun.tools.javac.code.Preview");
-        }catch(Throwable ignored) {
+        }catch(Throwable ignored){
             return false; // the class doesn't exists bellow Java 11.10
         }
 

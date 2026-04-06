@@ -1,3 +1,6 @@
+import module java.desktop;
+
+
 /**
  * Examples of Java 25 features with manual desugaring: <br>
 
@@ -12,6 +15,9 @@
  * // Decompiled (Java 8):
  * public class Main {
  *     public static void main(String[] args) {
+ *         new Main().main();
+ *     }
+ *     void main() {
  *         System.out.println("Hello");
  *     }
  * }
@@ -22,9 +28,11 @@ int variable = 1;
 
 static void main() {
     System.out/*IO*/.println("Implicit classes work!");
+    new ArrayList<>(); // Implicitly imported
+    new Point();
 }
 
-void main(String[] args) {
+void main(String... args) {
     System.out/*IO*/.println("instance main with args.");
     new Test();
 }
