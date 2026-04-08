@@ -95,6 +95,9 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
         log.useSource(old);
     }
 
+    @Override
+    public void finished(TaskEvent e){}
+
     public void transformClass(JCClassDecl classDecl){
         make.at(classDecl.pos);
 

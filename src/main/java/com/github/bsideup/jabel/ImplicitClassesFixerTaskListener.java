@@ -38,6 +38,9 @@ public class ImplicitClassesFixerTaskListener implements TaskListener{
         }
     }
 
+    @Override
+    public void finished(TaskEvent e){}
+
     @SuppressWarnings("unchecked")
     public void injectJavaBaseImports(JCCompilationUnit jcu){
         if (javaBaseImports == null) javaBaseImports = makeStarImports(getJavaBasePackages());

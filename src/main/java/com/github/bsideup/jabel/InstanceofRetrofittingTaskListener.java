@@ -35,6 +35,9 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         new InstanceofTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
     }
 
+    @Override
+    public void finished(TaskEvent e) {}
+
 
     public class InstanceofTranslator extends TreeTranslator{
         @Override

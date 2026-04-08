@@ -231,6 +231,9 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         new SwitchTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
     }
 
+    @Override
+    public void finished(TaskEvent e){}
+
 
     public class SwitchTranslator extends TreeTranslator{
         private final Map<JCSwitchExpression, JCExpression> captures = new HashMap<>();

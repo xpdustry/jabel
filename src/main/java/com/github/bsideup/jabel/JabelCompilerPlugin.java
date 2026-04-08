@@ -36,7 +36,10 @@ public class JabelCompilerPlugin implements Plugin{
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
         task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
-        task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
+        try{
+            task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
+        // Because JCDiagnostic.Warning doesn't exists on Java 8. But we don't care at this point
+        }catch(NoClassDefFoundError ignored){}
         task.addTaskListener(new ImplicitClassesFixerTaskListener(context));
     }
 
