@@ -33,7 +33,7 @@ import com.sun.tools.javac.util.List;
  * And Jabel cannot create a bridge for the first main, because there would be a signature duplication
  * with the second declared main.
  */
-class FlexibleMainRetrofittingTaskListener implements TaskListener{
+public class FlexibleMainRetrofittingTaskListener implements TaskListener{
     final TreeMaker make;
     final Names names;
     final Symtab syms;
@@ -42,12 +42,12 @@ class FlexibleMainRetrofittingTaskListener implements TaskListener{
     final Name mainName;
 
     FlexibleMainRetrofittingTaskListener(Context context){
-        this.make = TreeMaker.instance(context);
-        this.names = Names.instance(context);
-        this.syms = Symtab.instance(context);
-        this.log = Log.instance(context);
-        this.diagFactory = JCDiagnostic.Factory.instance(context);
-        this.mainName = names.fromString("main"); //syms.main;
+        make = TreeMaker.instance(context);
+        names = Names.instance(context);
+        syms = Symtab.instance(context);
+        log = Log.instance(context);
+        diagFactory = JCDiagnostic.Factory.instance(context);
+        mainName = names.fromString("main"); //syms.main;
 
         // Proper way to make warnings
         JavacMessages.instance(context).add(locale -> new ResourceBundle(){
@@ -89,27 +89,11 @@ class FlexibleMainRetrofittingTaskListener implements TaskListener{
 
         for(JCTree def : jcu.defs){
             if(!(def instanceof JCClassDecl)) continue;
-            JCClassDecl clazz = (JCClassDecl)def;
-            transformClass(clazz);
+            transformClass((JCClassDecl)def);
         }
 
         log.useSource(old);
     }
-
-    /*@Override
-    public void finished(TaskEvent e){
-        if(e.getKind() != TaskEvent.Kind.ANALYZE) return;
-        if(!(e.getCompilationUnit() instanceof JCCompilationUnit)) return;
-        JCCompilationUnit jcu = (JCCompilationUnit)e.getCompilationUnit();
-
-        for(JCTree def : jcu.defs){
-            if(!(def instanceof JCClassDecl)) continue;
-            JCClassDecl clazz = (JCClassDecl)def;
-            // Prevent implicit importation of an unnamed module
-            if((clazz.mods.flags & Flags.IMPLICIT_CLASS) != 0)
-                clazz.mods.flags = (clazz.mods.flags & ~Flags.IMPLICIT_CLASS) | Flags.FINAL;
-        }
-    }*/
 
     public void transformClass(JCClassDecl classDecl){
         make.at(classDecl.pos);
@@ -162,7 +146,7 @@ class FlexibleMainRetrofittingTaskListener implements TaskListener{
     }
 
     private void warn(JCMethodDecl method, String key, Object arg){
-        log.report(diagFactory.warning(log.currentSource(), method, new JCDiagnostic.Warning("jabel", key, arg)));
+        log.report(diagFactory.create(log.currentSource(), method, new JCDiagnostic.Warning("jabel", key, arg)));
     }
 
     public boolean isMain(JCMethodDecl method){

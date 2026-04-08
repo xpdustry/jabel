@@ -21,9 +21,11 @@ import static com.github.bsideup.jabel.RecordPatternHelper.*;
  */
 public class InstanceofRetrofittingTaskListener implements TaskListener{
     final RecordPatternHelper helper;
+    final TreeMaker make;
 
     public InstanceofRetrofittingTaskListener(Context context){
-        this.helper = new RecordPatternHelper(context);
+        helper = new RecordPatternHelper(context);
+        make = TreeMaker.instance(context);
     }
 
     @Override
@@ -72,14 +74,21 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         JCExpression recordType = getRecordType(pattern);
         if(recordType == null) return;
 
-        helper.make.at(ifStmt.pos);
+        make.at(ifStmt.pos);
         Name tempVar = helper.tempName();
 
         ListBuffer<JCVariableDecl> declarations = new ListBuffer<>();
-        declarations.append(helper.makeVarDef(tempVar, recordType,
-            helper.makeCast(recordType, instanceOf.expr)));
-        helper.extractRecordBindings(getRecordNested(pattern), helper.make.Ident(tempVar),
-            helper.getRecordComponentNames(pattern), declarations);
+        declarations.append(helper.makeVarDef(
+            tempVar,
+            recordType,
+            helper.makeCast(recordType, instanceOf.expr)
+        ));
+        helper.extractRecordBindings(
+            getRecordNested(pattern),
+            make.Ident(tempVar),
+            helper.getRecordComponentNames(pattern),
+            declarations
+        );
 
         instanceOf.pattern = recordType;
         ifStmt.thenpart = buildBlock(declarations.toList(), ifStmt.thenpart);
@@ -93,12 +102,15 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         JCVariableDecl var = ((JCBindingPattern)pattern).var;
         if(var == null || var.vartype == null) return;
 
-        helper.make.at(ifStmt.pos);
+        make.at(ifStmt.pos);
         instanceOf.pattern = helper.copy(var.vartype);
 
         ListBuffer<JCVariableDecl> declarations = new ListBuffer<>();
-        declarations.append(helper.makeVarDef(var.name, var.vartype,
-            helper.makeCast(var.vartype, instanceOf.expr)));
+        declarations.append(helper.makeVarDef(
+            var.name,
+            var.vartype,
+            helper.makeCast(var.vartype, instanceOf.expr)
+        ));
         ifStmt.thenpart = buildBlock(declarations.toList(), ifStmt.thenpart);
     }
 
@@ -110,6 +122,6 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         }else if(body != null){
             stmts.append(body);
         }
-        return helper.make.Block(0, stmts.toList());
+        return make.Block(0, stmts.toList());
     }
 }

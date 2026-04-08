@@ -1,5 +1,8 @@
 package com.github.bsideup.jabel;
 
+import java.lang.reflect.*;
+import java.util.*;
+
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.source.util.TreeScanner;
@@ -8,9 +11,6 @@ import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List;
-
-import java.lang.reflect.*;
-import java.util.*;
 
 import static com.github.bsideup.jabel.RecordPatternHelper.*;
 
@@ -218,10 +218,10 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     private int tempVarCounter = 0;
 
     public SwitchRetrofittingTaskListener(Context context){
-        this.helper = new RecordPatternHelper(context);
-        this.make = TreeMaker.instance(context);
-        this.syms = Symtab.instance(context);
-        this.names = Names.instance(context);
+        helper = new RecordPatternHelper(context);
+        make = TreeMaker.instance(context);
+        syms = Symtab.instance(context);
+        names = Names.instance(context);
     }
 
     @Override

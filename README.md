@@ -19,6 +19,11 @@ as they were supported in Java 8.
 The result is a valid Java 8 bytecode for your switch expressions, `var` declarations,
 and other features unavailable in Java 8.
 
+> [!NOTE]
+> Also please note that Jabel makes his best to adapt the syntax transformation, according to the currently used JDK. <br>
+> Jabel has been tested with Oracle's ones, on versions 8, 9, 12, 16, 17, 19, 21 and 25. <br>
+> In the vast majority of cases, everything works correctly. However, if you encounter a problem with another kind or version of JDK, feel free to [open an issue](https://github.com/xpdustry/jabel/issues/new).
+
 
 ## Why it works
 The JVM has evolved a lot for the past years. However, most language features

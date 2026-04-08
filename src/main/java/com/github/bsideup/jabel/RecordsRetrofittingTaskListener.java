@@ -1,5 +1,10 @@
 package com.github.bsideup.jabel;
 
+import java.util.Iterator;
+import java.util.stream.*;
+
+import javax.lang.model.element.Modifier;
+
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.source.util.TreeScanner;
@@ -8,23 +13,18 @@ import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
 
-import javax.lang.model.element.Modifier;
 
-import java.util.Iterator;
-import java.util.stream.*;
-
-
-/** Will generate {@code hashCode()}, {@code equals()} and {@code toString()} methods,
- *  and remove {@link Flags#RECORD}. */
-class RecordsRetrofittingTaskListener implements TaskListener{
-    final Context context;
+/**
+ * Will generate {@code hashCode()}, {@code equals()} and {@code toString()} methods,
+ * and remove {@link Flags#RECORD}.
+ */
+public class RecordsRetrofittingTaskListener implements TaskListener{
     final TreeMaker make;
     final Symtab syms;
     final Types types;
     final Names names;
 
     public RecordsRetrofittingTaskListener(Context context){
-        this.context = context;
         make = TreeMaker.instance(context);
         syms = Symtab.instance(context);
         types = Types.instance(context);

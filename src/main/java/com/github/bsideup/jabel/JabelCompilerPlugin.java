@@ -1,5 +1,7 @@
 package com.github.bsideup.jabel;
 
+import java.lang.reflect.*;
+
 import com.sun.source.util.*;
 import com.sun.tools.javac.api.*;
 import com.sun.tools.javac.code.*;
@@ -7,8 +9,6 @@ import com.sun.tools.javac.comp.*;
 import com.sun.tools.javac.util.*;
 
 import sun.misc.*;
-
-import java.lang.reflect.*;
 
 
 @SuppressWarnings({"deprecation", "removal"})
@@ -32,10 +32,12 @@ public class JabelCompilerPlugin implements Plugin{
         patchCachedFeatures(context);
         patchPreview(context);
         removeUnderscoreWarnings(context);
+
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
         task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
         task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
+        task.addTaskListener(new ImplicitClassesFixerTaskListener(context));
     }
 
     @Override
@@ -62,10 +64,10 @@ public class JabelCompilerPlugin implements Plugin{
 
             // List of features that are impossible or too difficult to adapt.
             String[] blacklist = {
-                "MODULES",               // Impossible: cannot make a module-info.java on Java 8
-                "STRING_TEMPLATES",      // Not relevant: removed in Java 23 because of a confusing design
-                "MODULE_IMPORTS",        // Impossible: needs the modules system
-                "JAVA_BASE_TRANSITIVE",  // Impossible: needs the modules system
+                "MODULES",               // Extremely difficult as initialization is done very early
+                "STRING_TEMPLATES",      // Appeared on Java 21 and removed on Java 23 because of a confusing design
+                "MODULE_IMPORTS",        // Needs the modules system
+                "JAVA_BASE_TRANSITIVE",  // Needs the modules system
             };
 
             // We don't care, enable everything except few ones
