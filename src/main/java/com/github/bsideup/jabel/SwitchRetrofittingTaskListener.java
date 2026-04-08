@@ -1,5 +1,8 @@
 package com.github.bsideup.jabel;
 
+import java.lang.reflect.*;
+import java.util.*;
+
 import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.source.util.TreeScanner;
@@ -8,9 +11,6 @@ import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List;
-
-import java.lang.reflect.*;
-import java.util.*;
 
 import static com.github.bsideup.jabel.RecordPatternHelper.*;
 
@@ -111,10 +111,14 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     // Because the return type of these two methods may not exist, we need delay the call to an inner class.
     // Like that, the class initialization error can be catched easily.
     private static final class DefaultCaseLabelFactory{
-        static JCTree make(TreeMaker m){ return m.DefaultCaseLabel(); }
+        static JCTree make(TreeMaker m){
+            return m.DefaultCaseLabel();
+        }
     }
     private static final class ConstantCaseLabelFactory{
-        static JCTree make(TreeMaker m, JCExpression lit){ return m.ConstantCaseLabel(lit); }
+        static JCTree make(TreeMaker m, JCExpression lit){
+            return m.ConstantCaseLabel(lit);
+        }
     }
 
     /** Create a default case label. Returns null if unsupported (JDK < 17). */
@@ -214,10 +218,10 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     private int tempVarCounter = 0;
 
     public SwitchRetrofittingTaskListener(Context context){
-        this.helper = new RecordPatternHelper(context);
-        this.make = TreeMaker.instance(context);
-        this.syms = Symtab.instance(context);
-        this.names = Names.instance(context);
+        helper = new RecordPatternHelper(context);
+        make = TreeMaker.instance(context);
+        syms = Symtab.instance(context);
+        names = Names.instance(context);
     }
 
     @Override
@@ -228,12 +232,10 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     }
 
     @Override
-    public void finished(TaskEvent e){
-
-    }
+    public void finished(TaskEvent e){}
 
 
-    private class SwitchTranslator extends TreeTranslator{
+    public class SwitchTranslator extends TreeTranslator{
         private final Map<JCSwitchExpression, JCExpression> captures = new HashMap<>();
 
         @Override
@@ -348,8 +350,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
      * @param expression whether to build a switch expression or statement
      * @param rawSel original selector to inject as a capture, or {@code null}
      */
-    public JCSwitch transformSwitch(JCExpression sel, List<JCCase> cases, boolean expression,
-                                    JCExpression rawSel){
+    public JCSwitch transformSwitch(JCExpression sel, List<JCCase> cases, boolean expression, JCExpression rawSel){
         java.util.List<JCCase> nonDefs = new ArrayList<>();
         JCCase defCase = null;
         for(JCCase c : cases){
@@ -369,7 +370,8 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                 // Replace the first reference to the selector ident with (sv = rawSel).
                 final boolean[] done = {false};
                 cond = new TreeTranslator(){
-                    @Override public void visitIdent(JCIdent id){
+                    @Override
+                    public void visitIdent(JCIdent id){
                         if(!done[0] && id.name == selName){
                             done[0] = true;
                             result  = make.Parens(make.Assign(make.Ident(selName), rawSel));
@@ -603,6 +605,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         return make.VarDef(make.Modifiers(Flags.FINAL), name, type, init);
     }
 
+    //TODO: explain expected cases?
     private JCStatement makeMatchExceptionThrow(){
         return make.Throw(make.NewClass(
             null,

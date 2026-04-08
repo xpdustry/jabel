@@ -1,12 +1,12 @@
 package com.github.bsideup.jabel;
 
+import java.util.*;
+
 import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
 import com.sun.tools.javac.util.List;
-
-import java.util.*;
 
 
 /** Utilities for record pattern extraction and tree manipulation. */
@@ -44,7 +44,9 @@ class RecordPatternHelper{
      * Like that, the class initialization error can be catched easily.
      */
     private static final class PatternCaseLabelAccess{
-        static JCTree pat(JCTree label){ return ((JCPatternCaseLabel)label).pat; }
+        static JCTree pat(JCTree label){
+            return ((JCPatternCaseLabel)label).pat;
+        }
     }
 
     /** Get the binding variable from a pattern (binding pattern or pattern case label). */
@@ -121,8 +123,8 @@ class RecordPatternHelper{
     private static int tempVarCounter = 0;
 
     RecordPatternHelper(Context context){
-        this.make = TreeMaker.instance(context);
-        this.names = Names.instance(context);
+        make = TreeMaker.instance(context);
+        names = Names.instance(context);
     }
 
     /** Collect a record declaration for later component name lookup. Call during tree traversal. */

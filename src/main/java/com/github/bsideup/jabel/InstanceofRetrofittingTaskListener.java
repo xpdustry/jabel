@@ -1,6 +1,5 @@
 package com.github.bsideup.jabel;
 
-import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
@@ -22,47 +21,50 @@ import static com.github.bsideup.jabel.RecordPatternHelper.*;
  */
 public class InstanceofRetrofittingTaskListener implements TaskListener{
     final RecordPatternHelper helper;
+    final TreeMaker make;
 
     public InstanceofRetrofittingTaskListener(Context context){
-        this.helper = new RecordPatternHelper(context);
+        helper = new RecordPatternHelper(context);
+        make = TreeMaker.instance(context);
     }
 
     @Override
     public void started(TaskEvent e){
         if(e.getKind() != TaskEvent.Kind.ENTER) return;
-        CompilationUnitTree cu = e.getCompilationUnit();
-        if(!(cu instanceof JCCompilationUnit)) return;
-        new TreeTranslator(){
-            @Override
-            public <T extends JCTree> T translate(T tree){
-                if(tree == null) return null;
-                helper.collectRecord(tree);
-                if(tree instanceof JCIf) {
-                    JCIf ifStmt = (JCIf)tree;
-                    JCExpression cond = unwrapParenthesis(ifStmt.cond);
-                    if(!(cond instanceof JCInstanceOf)) return super.translate(tree);
-
-                    JCInstanceOf instanceOf = (JCInstanceOf)cond;
-                    JCTree pattern = instanceOf.pattern;
-                    if(pattern == null) return super.translate(tree);
-
-                    if(isRecordPattern(pattern)){
-                        transformRecordPattern(ifStmt, instanceOf, pattern);
-                    }else if(isBindingPattern(pattern)){
-                        transformBindingPattern(ifStmt, instanceOf, pattern);
-                    }
-                }
-                return super.translate(tree);
-            }
-        }.translate((JCCompilationUnit)cu);
+        if(!(e.getCompilationUnit() instanceof JCCompilationUnit)) return;
+        new InstanceofTranslator().translate((JCCompilationUnit)e.getCompilationUnit());
     }
 
     @Override
-    public void finished(TaskEvent e){
+    public void finished(TaskEvent e) {}
 
+
+    public class InstanceofTranslator extends TreeTranslator{
+        @Override
+        public <T extends JCTree> T translate(T tree){
+            if(tree == null) return null;
+            helper.collectRecord(tree);
+            if(tree instanceof JCIf) {
+                JCIf ifStmt = (JCIf)tree;
+                JCExpression cond = unwrapParenthesis(ifStmt.cond);
+                if(!(cond instanceof JCInstanceOf)) return super.translate(tree);
+
+                JCInstanceOf instanceOf = (JCInstanceOf)cond;
+                JCTree pattern = instanceOf.pattern;
+                if(pattern == null) return super.translate(tree);
+
+                if(isRecordPattern(pattern)){
+                    transformRecordPattern(ifStmt, instanceOf, pattern);
+                }else if(isBindingPattern(pattern)){
+                    transformBindingPattern(ifStmt, instanceOf, pattern);
+                }
+            }
+            return super.translate(tree);
+        }
     }
 
-    public static JCExpression unwrapParenthesis(JCExpression expr){
+
+    public JCExpression unwrapParenthesis(JCExpression expr){
         while(expr instanceof JCParens) expr = ((JCParens)expr).expr;
         return expr;
     }
@@ -75,14 +77,21 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         JCExpression recordType = getRecordType(pattern);
         if(recordType == null) return;
 
-        helper.make.at(ifStmt.pos);
+        make.at(ifStmt.pos);
         Name tempVar = helper.tempName();
 
         ListBuffer<JCVariableDecl> declarations = new ListBuffer<>();
-        declarations.append(helper.makeVarDef(tempVar, recordType,
-            helper.makeCast(recordType, instanceOf.expr)));
-        helper.extractRecordBindings(getRecordNested(pattern), helper.make.Ident(tempVar),
-            helper.getRecordComponentNames(pattern), declarations);
+        declarations.append(helper.makeVarDef(
+            tempVar,
+            recordType,
+            helper.makeCast(recordType, instanceOf.expr)
+        ));
+        helper.extractRecordBindings(
+            getRecordNested(pattern),
+            make.Ident(tempVar),
+            helper.getRecordComponentNames(pattern),
+            declarations
+        );
 
         instanceOf.pattern = recordType;
         ifStmt.thenpart = buildBlock(declarations.toList(), ifStmt.thenpart);
@@ -96,12 +105,15 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         JCVariableDecl var = ((JCBindingPattern)pattern).var;
         if(var == null || var.vartype == null) return;
 
-        helper.make.at(ifStmt.pos);
+        make.at(ifStmt.pos);
         instanceOf.pattern = helper.copy(var.vartype);
 
         ListBuffer<JCVariableDecl> declarations = new ListBuffer<>();
-        declarations.append(helper.makeVarDef(var.name, var.vartype,
-            helper.makeCast(var.vartype, instanceOf.expr)));
+        declarations.append(helper.makeVarDef(
+            var.name,
+            var.vartype,
+            helper.makeCast(var.vartype, instanceOf.expr)
+        ));
         ifStmt.thenpart = buildBlock(declarations.toList(), ifStmt.thenpart);
     }
 
@@ -113,6 +125,6 @@ public class InstanceofRetrofittingTaskListener implements TaskListener{
         }else if(body != null){
             stmts.append(body);
         }
-        return helper.make.Block(0, stmts.toList());
+        return make.Block(0, stmts.toList());
     }
 }
