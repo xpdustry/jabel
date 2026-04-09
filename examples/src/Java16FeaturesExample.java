@@ -51,6 +51,8 @@ public class Java16FeaturesExample {
     }
 
     record Person(String name, int age) {
+        static Object planet;
+
         Person {
             Objects.requireNonNull(name);
             if (age < 0) throw new IllegalArgumentException();
@@ -60,7 +62,14 @@ public class Java16FeaturesExample {
     record MultipleTypes(boolean bool, byte b, short s, int i, long l,
                          float f, double d, String str, Point p) {
       @Override
-      public boolean equals(Object o) { return this == o; }
+      public boolean equals(Object o) {
+          return this == o;
+      }
+
+      @Override
+      public String str() {
+          return "different string.";
+      }
     }
 
     void patternMatchingInstanceof(Object obj) {

@@ -67,7 +67,15 @@ class Main {
         assert sp.value == 99 && !sp.spoofed : "SpoofChild";
         System.out.println("SpoofChild: value=" + sp.value + " spoofed=" + sp.spoofed);
         //Implicit classes
-        //Java25FeaturesExample2.main(); // in theory we cannot reference the class
+        // Need reflection since implicit classes cannot be referenced
+        try {
+            java.lang.reflect.Method main = Class.forName("Java25FeaturesExample2").getDeclaredMethod("main");
+            main.setAccessible(true);
+            main.invoke(null);
+        } catch (Exception e) {
+            System.err.println("Implicit classes error: " + e.toString());
+            return;
+        }
 
         System.out.println("\n=== All features work! ===");
     }

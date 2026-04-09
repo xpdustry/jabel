@@ -132,8 +132,9 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
             JCTree next = iterator.next();
             if (!(next instanceof JCMethodDecl)) continue;
             JCMethodDecl def = (JCMethodDecl)next;
-            if (def.getName() == name) return true;
-            if(name != names.equals || def.params.size() != 1) continue;
+            if (def.getName() != name) continue;
+            if(name != names.equals) return true;
+            if(def.params.size() != 1) continue;
             // TODO find a better way?
             switch(def.params.get(0).getType().toString()){
                 case "java.lang.Object":

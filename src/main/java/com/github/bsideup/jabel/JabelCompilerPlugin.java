@@ -89,6 +89,7 @@ public class JabelCompilerPlugin implements Plugin{
      * Several compiler components cache {@link Source.Feature#allowedInSource()} results. <br>
      * Since these objects may be created <em>before</em> Jabel,
      * this method will try to force all {@code allow*} fields to {@code true}.
+     * (except {@code allowModules} fields, because the module system is not yet supported by Jabel)
      */
     static void patchCachedFeatures(Context context){
         Object[] comps = {
@@ -101,6 +102,7 @@ public class JabelCompilerPlugin implements Plugin{
             for(Field f : comp.getClass().getDeclaredFields()){
                 try{
                     if(f.getType() != boolean.class || !f.getName().startsWith("allow")) continue;
+                    if(f.getName().equals("allowModules")) continue; // special case
                     unsafe.putBoolean(comp, unsafe.objectFieldOffset(f), true);
                 }catch(Exception ignored){}
              }

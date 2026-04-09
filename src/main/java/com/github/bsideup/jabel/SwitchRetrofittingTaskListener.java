@@ -171,8 +171,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         List<JCTree> labels = getLabels(caseTree);
         if(labels.isEmpty()) return true;
         for(JCTree label : labels){
-            if(!isDefault(label)) continue;
-            return true;
+            if(isDefault(label)) return true;
         }
         return false;
     }
@@ -189,8 +188,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
             if(caseTree == null) continue;
             if(getGuard(caseTree) != null) return true;
             for(JCTree label : getLabels(caseTree)){
-                if(!isPattern(label)) continue;
-                return true;
+                if(isPattern(label)) return true;
             }
         }
         return false;
@@ -201,8 +199,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         for(JCCase caseTree : cases){
             if(caseTree == null) continue;
             for(JCTree label : getLabels(caseTree)){
-                if(!isNull(label)) continue;
-                return true;
+                if(isNull(label)) return true;
             }
         }
         return false;
@@ -368,12 +365,12 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
             if(cond == null) continue;
             if(i == 0 && rawSel != null && selName != null){
                 // Replace the first reference to the selector ident with (sv = rawSel).
-                final boolean[] done = {false};
                 cond = new TreeTranslator(){
+                    boolean c = true;
                     @Override
                     public void visitIdent(JCIdent id){
-                        if(!done[0] && id.name == selName){
-                            done[0] = true;
+                        if(c && id.name == selName){
+                            c = false;
                             result  = make.Parens(make.Assign(make.Ident(selName), rawSel));
                         }else result = id;
                     }
