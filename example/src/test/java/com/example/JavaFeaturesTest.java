@@ -9,6 +9,5 @@ public class JavaFeaturesTest {
     @Test
     public void shouldWork() {
         Main.main(new String[0]);
-        //TODO: Java25FeaturesExample2.main(new String[0]);
     }
 }
