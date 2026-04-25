@@ -4,7 +4,7 @@ import com.sun.source.util.*;
 import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.code.Symbol.*;
 import com.sun.tools.javac.code.Type.*;
-import com.sun.tools.javac.comp.Operators;
+import com.sun.tools.javac.comp.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
@@ -15,27 +15,20 @@ import com.sun.tools.javac.util.*;
  * by {@link RuntimeException}.
  */
 public class RecordPatternRetrofittingTaskListener implements TaskListener{
-    private boolean MATCH_EXCEPTION_PRESENT = SwitchRetrofittingTaskListener.MATCH_EXCEPTION_PRESENT;
-
+    final Context context;
     final TreeMaker make;
     final Symtab syms;
     final Names names;
-    final MethodSymbol runtimeExceptionConstructor;
-    final OperatorSymbol opCONCAT;
+
+    private boolean MATCH_EXCEPTION_PRESENT = SwitchRetrofittingTaskListener.MATCH_EXCEPTION_PRESENT;
+    private MethodSymbol runtimeExceptionConstructor;
+    private OperatorSymbol opCONCAT;
 
     public RecordPatternRetrofittingTaskListener(Context context){
+        this.context = context;
         make = TreeMaker.instance(context);
         syms = Symtab.instance(context);
         names = Names.instance(context);
-
-        runtimeExceptionConstructor = getRuntimeExceptionConstructor();
-        opCONCAT = SwitchRetrofittingTaskListener.resolveBinary(
-            Operators.instance(context),
-            make.Literal(0),
-            Tag.PLUS,
-            syms.stringType,
-            syms.stringType
-        );
     }
 
     @Override
@@ -77,19 +70,19 @@ public class RecordPatternRetrofittingTaskListener implements TaskListener{
             super.visitNewClass(tree);
             if(!isMatchException(tree.clazz)) return;
 
-            if(runtimeExceptionConstructor != null){
+            if(getRuntimeExceptionConstructor() != null){
                 tree.clazz = make.QualIdent(syms.runtimeExceptionType.tsym)
                                  .setType(syms.runtimeExceptionType);
                 tree.type = syms.runtimeExceptionType;
-                tree.constructor = runtimeExceptionConstructor;
+                tree.constructor = getRuntimeExceptionConstructor();
             }
-            if(opCONCAT != null){
+            if(getConcatOperator() != null){
                 tree.args.head = make.Binary(
                     Tag.PLUS,
                     make.Literal("MatchException: Record-pattern unpacking failed: "),
                     tree.args.head
                 ).setType(syms.stringType);
-                ((JCBinary)tree.args.head).operator = opCONCAT;
+                ((JCBinary)tree.args.head).operator = getConcatOperator();
             } else {
                 tree.args.head = make.Literal("MatchException: record-pattern unpacking failed");
             }
@@ -142,15 +135,29 @@ public class RecordPatternRetrofittingTaskListener implements TaskListener{
         cs.completer = Completer.NULL_COMPLETER;
     }
 
+    // Lazily initialize cache, to avoid initialization errors on JDK 8
+
     public MethodSymbol getRuntimeExceptionConstructor(){
+       if(runtimeExceptionConstructor != null) return runtimeExceptionConstructor;
        for(Symbol sym : syms.runtimeExceptionType.tsym.members().getSymbols()){
             if(sym.kind != Kinds.Kind.MTH) continue;
             if(sym.name != names.init) continue;
             MethodSymbol m = (MethodSymbol) sym;
             if(m.params().size() != 2) continue;
             //TODO: check for actual types?
-            return m;
+            return runtimeExceptionConstructor = m;
         }
         return null;
+    }
+
+    public OperatorSymbol getConcatOperator(){
+        if(opCONCAT != null) return opCONCAT;
+        return opCONCAT = SwitchRetrofittingTaskListener.resolveBinary(
+            Operators.instance(context),
+            make.Literal(0),
+            Tag.PLUS,
+            syms.stringType,
+            syms.stringType
+        );
     }
 }

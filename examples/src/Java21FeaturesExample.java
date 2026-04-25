@@ -85,7 +85,7 @@ public class Java21FeaturesExample {
             return switch (dz) {
                 case START -> "starting";
                 case END -> "ending";
-                //case null -> "unknown";
+                case null -> "unknown";
             };
         }
     }
@@ -149,7 +149,7 @@ public class Java21FeaturesExample {
             default -> "<not a day>";
         };
     }
-*
+
     String classicWithNull(Integer day) {
         return switch (day) {
             case 6, 7 -> "weekend";

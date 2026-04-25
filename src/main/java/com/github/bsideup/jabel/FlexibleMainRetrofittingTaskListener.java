@@ -34,6 +34,50 @@ import com.sun.tools.javac.util.List;
  * with the second declared main.
  */
 public class FlexibleMainRetrofittingTaskListener implements TaskListener{
+    // region compiler compatibility
+
+    // Because JCDiagnostic.DiagnosticInfo and ResourceBundle doesn't exists in JDK 8
+    private static class WarnMaker{
+        static void init(Context context){
+            // Proper way to make warnings
+            JavacMessages.instance(context).add(locale -> new ResourceBundle(){
+                final Map<String, String> keys = new HashMap<>(2);
+                {
+                    // Act like it's linting
+                    keys.put(
+                        "jabel.warn.possible.signature.duplication",
+                        "[jabel] possible entry point cannot be adapted " +
+                        "due to a signature duplication. " +
+                        "''{0}'' cannot therefore be used as an entry point in a JVM bellow Java25."
+                    );
+                    keys.put(
+                        "jabel.warn.no.default.constructor.found",
+                        "[jabel] possible entry point cannot be adapted " +
+                        "because no instanciable default constructor was found. " +
+                        "''{0}'' cannot therefore be used as an entry point in a JVM bellow Java25."
+                    );
+                }
+
+                @Override
+                protected Object handleGetObject(String key){
+                    return keys.get(key);
+                }
+
+                @Override
+                public Enumeration<String> getKeys(){
+                    return Collections.enumeration(keys.keySet());
+                }
+            });
+        }
+
+        static JCDiagnostic.DiagnosticInfo make(String key, Object arg){
+            return new JCDiagnostic.Warning("jabel", key, arg);
+        }
+    }
+
+    // end region
+    // region listener
+
     final TreeMaker make;
     final Names names;
     final Symtab syms;
@@ -49,35 +93,9 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
         diagFactory = JCDiagnostic.Factory.instance(context);
         mainName = names.fromString("main"); //syms.main;
 
-        // Proper way to make warnings
-        JavacMessages.instance(context).add(locale -> new ResourceBundle(){
-            final Map<String, String> keys = new HashMap<>(2);
-            {
-                // Act like it's linting
-                keys.put(
-                    "jabel.warn.possible.signature.duplication",
-                    "[jabel] possible entry point cannot be adapted " +
-                    "due to a signature duplication. " +
-                    "''{0}'' cannot therefore be used as an entry point in a JVM bellow Java25."
-                );
-                keys.put(
-                    "jabel.warn.no.default.constructor.found",
-                    "[jabel] possible entry point cannot be adapted " +
-                    "because no instanciable default constructor was found. " +
-                    "''{0}'' cannot therefore be used as an entry point in a JVM bellow Java25."
-                );
-            }
-
-            @Override
-            protected Object handleGetObject(String key){
-                return keys.get(key);
-            }
-
-            @Override
-            public Enumeration<String> getKeys(){
-                return Collections.enumeration(keys.keySet());
-            }
-        });
+        try {
+            WarnMaker.init(context);
+        }catch (Throwable ignored) {}
     }
 
     @Override
@@ -148,13 +166,6 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
         return (m.mods.flags & Flags.STATIC) != 0;
     }
 
-    // Because JCDiagnostic.DiagnosticInfo doesn't exists in Java 8
-    private static class WarnMaker {
-        static JCDiagnostic.DiagnosticInfo make(String key, Object arg) {
-            return new JCDiagnostic.Warning("jabel", key, arg);
-        }
-    }
-
     private void warn(JCMethodDecl method, String key, Object arg){
         try{
             log.report(diagFactory.create(log.currentSource(), method, WarnMaker.make(key, arg)));
@@ -205,7 +216,9 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
     }
 
     /** Creates a main bridge in the specified class. */
-    public void addMainBridge(JCClassDecl classDecl, boolean toLocalMain) {
+    public void addMainBridge(JCClassDecl classDecl, boolean toLocalMain){
         classDecl.defs = classDecl.defs.append(makeMainBridge(classDecl, toLocalMain));
     }
+
+    // end region
 }

@@ -1,4 +1,4 @@
- // Examples made by Claude Opus 4.5
+// Examples made by Claude Opus 4.5
 
 /**
  * Examples of Java 14 features desugared by the compiler: <br>

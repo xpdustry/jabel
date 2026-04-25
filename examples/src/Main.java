@@ -41,6 +41,8 @@ class Main {
         var java17 = new Java17FeaturesExample();
         System.out.println("sealed classes works!");
         System.out.println("strictfp method: " + java17.strictMethod(3.14, 2.71));
+        System.out.println("pattern switch: " + java17.patternSwitch("test"));
+        System.out.println("pattern switch statement: " + java17.patternSwitchStatement(42));
 
         System.out.println("\n--- Java 21 Features ---");
         var java21 = new Java21FeaturesExample();

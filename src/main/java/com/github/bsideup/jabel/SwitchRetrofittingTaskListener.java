@@ -38,7 +38,8 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     // Because we're compiling with JDK 25, the old method (without guards) doens't exists.
     private static Method LEGACY_MAKE_CASE;
     // Some internal states to avoid getting errors everytimes we trying to use a found feature.
-    private static Boolean GUARDS, LABELS, BODIES, DEFAULT_CASES, CONSTANT_CASES, PATTERN_MATCHING_CATCH;
+    // true means that the feature is not present, by default assuming it is.
+    private static boolean GUARD, LABELS, BODY, DEFAULT_CASE, CONSTANT_CASE, PATTERN_MATCHING_CATCH, SWITCH_PATTERN;
     /*private*/ static boolean MATCH_EXCEPTION_PRESENT;
 
     static{
@@ -50,13 +51,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     /** Get the guard expression from a case, or null if guards are unsupported. */
     private static JCExpression getGuard(JCCase caseTree){
-        if(GUARDS != null) return GUARDS ? caseTree.getGuard() : null;
+        if(GUARD) return null;
         try{
-            JCExpression guard = caseTree.getGuard();
-            GUARDS = true;
-            return guard;
+            return caseTree.getGuard();
         }catch(NoSuchMethodError ignored){
-            GUARDS = false;
+            GUARD = true;
             return null;
         }
     }
@@ -64,16 +63,13 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     /** Get the labels from a case, handling both old and new compiler APIs. */
     @SuppressWarnings("unchecked")
     private static List<JCTree> getLabels(JCCase caseTree){
-        if(LABELS == null){
-            try{
-                List<? extends JCTree> l = caseTree.getLabels();
-                LABELS = true;
-                return (List<JCTree>)l;
+        if(!LABELS){
+           try{
+                return (List<JCTree>)(List<? extends JCTree>)caseTree.getLabels();
             }catch(NoSuchMethodError ignored){
-                LABELS = false;
+                LABELS = true;
             }
         }
-        if(LABELS) return (List<JCTree>)(List<? extends JCTree>)caseTree.getLabels();
 
         List<JCExpression> labels = caseTree.getExpressions();
         if(labels == null) return List.nil();
@@ -87,13 +83,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     /** Get the arrow-style body of a case, or null if unsupported. */
     private static JCTree getBody(JCCase caseTree){
-        if(BODIES != null) return BODIES ? caseTree.getBody() : null;
+        if(BODY) return null;
         try{
-            JCTree body = caseTree.getBody();
-            BODIES = true;
-            return body;
+            return caseTree.getBody();
         }catch(NoSuchMethodError ignored){
-            BODIES = false;
+            BODY = true;
             return null;
         }
     }
@@ -111,19 +105,19 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         // A default case is one that have no labels on JDK < 17
         if(!labels.isEmpty() && labels.head == null) labels = List.nil();
 
-        if(GUARDS != false){
+        if(!GUARD){
             try{
-                JCCase c = make.Case(kind, (List<JCCaseLabel>)labels, null, stats, body);
-                GUARDS = true;
-                return c;
-            }catch(NoSuchMethodError ignored){}
+                return make.Case(kind, (List<JCCaseLabel>)labels, null, stats, body);
+            }catch(NoSuchMethodError ignored){
+                GUARD = true;
+            }
         }
 
         try{
-            GUARDS = false;
             if(LEGACY_MAKE_CASE == null){
-                LEGACY_MAKE_CASE = TreeMaker.class.getMethod("Case", CaseTree.CaseKind.class, List.class,
-                                                             List.class, JCTree.class);
+                LEGACY_MAKE_CASE = TreeMaker.class.getMethod(
+                    "Case", CaseTree.CaseKind.class, List.class, List.class, JCTree.class
+                );
             }
             return (JCCase)LEGACY_MAKE_CASE.invoke(make, kind, labels, stats, body);
         }catch(Exception ignored){// Hope this never happen...
@@ -147,13 +141,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     /** Create a default case label. Returns null if unsupported (JDK < 17). */
     private JCTree makeDefaultCaseLabel(){
-        if(DEFAULT_CASES != null) return DEFAULT_CASES ? DefaultCaseLabelFactory.make(make) : null;
+        if(DEFAULT_CASE) return null;
         try{
-            JCTree c = DefaultCaseLabelFactory.make(make);
-            DEFAULT_CASES = true;
-            return c;
+            return DefaultCaseLabelFactory.make(make);
         }catch(NoSuchMethodError | NoClassDefFoundError ignored){
-            DEFAULT_CASES = false;
+            DEFAULT_CASE = true;
             return null;
         }
     }
@@ -161,13 +153,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     /** Creates a case label for an {@code Integer}, handling JDK 17-20 and 21+ APIs. */
     private JCTree makeLabel(int i){
         JCLiteral lit = make.Literal(i);
-        if(CONSTANT_CASES != null) return CONSTANT_CASES ? ConstantCaseLabelFactory.make(make, lit) : lit;
+        if(CONSTANT_CASE) return lit;
         try{
-            JCTree tree = ConstantCaseLabelFactory.make(make, lit); // JDK 21+
-            CONSTANT_CASES = true;
-            return tree;
+            return ConstantCaseLabelFactory.make(make, lit); // JDK 21+
         }catch(NoSuchMethodError | NoClassDefFoundError ignored){
-            CONSTANT_CASES = false;
+            CONSTANT_CASE = true;
             return lit; // JDK 17-20
         }
     }
@@ -184,31 +174,38 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     }
 
     /*private*/ static JCCatch getPatternMatchingCatchHandler(JCBlock block){
-        if(PATTERN_MATCHING_CATCH != null){
-          return PATTERN_MATCHING_CATCH ? PatternMatchingCatchAccess.handler(block) : null;
-        }
+        if(PATTERN_MATCHING_CATCH) return null;
         try{
-            JCCatch h = PatternMatchingCatchAccess.handler(block);
-            PATTERN_MATCHING_CATCH = true;
-            return h;
+            return PatternMatchingCatchAccess.handler(block);
         }catch(NoSuchFieldError | NoClassDefFoundError ignored){
-            PATTERN_MATCHING_CATCH = false;
+            PATTERN_MATCHING_CATCH = true;
             return null;
         }
     }
 
     private static void attachPatternMatchingCatch(JCBlock block, JCCatch body, Set<JCMethodInvocation> calls){
-        if(PATTERN_MATCHING_CATCH != null){
-          if(PATTERN_MATCHING_CATCH){
-            PatternMatchingCatchAccess.attach(block, body, calls);
-          }
-          return;
-        }
+        if(PATTERN_MATCHING_CATCH) return;
         try{
             PatternMatchingCatchAccess.attach(block, body, calls);
-            PATTERN_MATCHING_CATCH = true;
         }catch(NoSuchFieldError | NoClassDefFoundError ignored){
-            PATTERN_MATCHING_CATCH = false;
+            PATTERN_MATCHING_CATCH = true;
+        }
+    }
+
+    /** Sets {@code patternSwitch = false} on a switch, silently ignoring JDK < 17. */
+    private static void clearPatternSwitchStatus(JCTree tree){
+        if(SWITCH_PATTERN) return;
+        try {
+            switch(getClassName(tree)){
+                case "JCSwitch":
+                    ((JCSwitch)tree).patternSwitch = false;
+                    break;
+                case "JCSwitchExpression":
+                    ((JCSwitchExpression)tree).patternSwitch = false;
+                    break;
+            }
+        }catch(NoSuchFieldError | NoClassDefFoundError ignored){
+            SWITCH_PATTERN = true;
         }
     }
 
@@ -232,7 +229,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         return name.contains("Pattern") || name.contains("Binding");
     }
 
-    private static boolean isSwitchExpression(Tree tree){
+    private static boolean isSwitchExpression(JCTree tree){
         return tree != null && getClassName(tree).equals("JCSwitchExpression");
     }
 
@@ -333,18 +330,6 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         }
     }
 
-    /** Sets {@code patternSwitch = false} on a switch, silently ignoring JDK < 17. */
-    private static void clearPatternSwitchStatus(JCTree tree){
-        switch(getClassName(tree)){
-            case "JCSwitch":
-                ((JCSwitch)tree).patternSwitch = false;
-                break;
-            case "JCSwitchExpression":
-                ((JCSwitchExpression)tree).patternSwitch = false;
-                break;
-        }
-    }
-
     private static boolean hasDefault(List<JCCase> cases){
         if(cases == null) return true;
         for(JCCase c : cases){
@@ -425,14 +410,19 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     }
 
 
+    //NOTE: Operators class doesn't exists on JDK 8
     static Method resolveBinary;
+    static boolean HAS_OPERATORS = true;
     static {
         try{
             resolveBinary = Operators.class.getDeclaredMethod(
                 "resolveBinary", DiagnosticPosition.class, Tag.class, Type.class, Type.class
             );
             resolveBinary.setAccessible(true);
-        }catch(Exception e){ e.printStackTrace(); }
+        }catch(Exception ignored){
+        }catch (Throwable ignored) {
+            HAS_OPERATORS = false;
+        }
     }
 
     /*private*/ static OperatorSymbol resolveBinary(Operators ops, DiagnosticPosition pos, Tag tag, Type op1, Type op2){
@@ -449,11 +439,12 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     // end region
     // region task listener
 
+    final Context context;
     final TreeMaker make;
     final Symtab syms;
     final Names names;
     final Types types;
-    final Operators ops;
+    /*final*/ Object/*Operators*/ ops;
     final Attr attr;
     final SymTreeCopier<Void> copier;
 
@@ -466,11 +457,12 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                          float_floatToIntBits, double_doubleToLongBits, icce_ctor, me_ctor;
 
     public SwitchRetrofittingTaskListener(Context context){
+        this.context = context;
         make = TreeMaker.instance(context);
         syms = Symtab.instance(context);
         names = Names.instance(context);
         types = Types.instance(context);
-        ops = Operators.instance(context);
+        if (HAS_OPERATORS) ops = Operators.instance(context);
         attr = Attr.instance(context);
         copier = new SymTreeCopier<Void>(make);
     }
@@ -488,7 +480,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     public class SwitchTranslator extends TreeTranslator{
         /** Captures the original selector of a switch expression before replacement by a temp var. */
-        private final Map<JCSwitchExpression, JCExpression> captures = new HashMap<>();
+        private final Map<JCTree, JCExpression> captures = new HashMap<>();
         private Set<JCMethodInvocation> blockAccessorCalls = null;
         private ClassSymbol currentClass;
 
@@ -573,8 +565,8 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         @Override
         public void visitSwitch(JCSwitch tree){
             super.visitSwitch(tree);
-            clearPatternSwitchStatus(tree); // always clear, TransPatterns must not re-process our output
             if(!needsTransform(tree.cases)) return;
+            clearPatternSwitchStatus(tree); // TransPatterns must not re-process our output
 
             make.at(tree.pos);
             ListBuffer<JCStatement> prefix = new ListBuffer<>();
@@ -592,11 +584,12 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
         private ListBuffer<JCStatement> prepareExprSwitchPrefix(JCStatement stmt, ListBuffer<JCStatement> buffer,
                                                                 List<JCStatement> allStats){
-            List<JCSwitchExpression> found = findPatternSwitches(stmt);
-            if(found.isEmpty()) return buffer;
+            List<JCTree> found = findPatternSwitches(stmt);
+            if (found.isEmpty()) return buffer;
 
             boolean needsBuffer = false;
-            for(JCSwitchExpression sw : found){
+            for(JCTree tree : found){
+                JCSwitchExpression sw = (JCSwitchExpression)tree;
                 if(isComplex(sw.selector) || hasGuardRecordPatterns(sw.cases)){
                     needsBuffer = true;
                     break;
@@ -613,10 +606,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                 buffer = buf;
             }
 
-            for(JCSwitchExpression sw : found){
+            for(JCTree tree : found){
+                JCSwitchExpression sw = (JCSwitchExpression)tree;
                 JCExpression sel = captureSelector(sw.selector, buffer, false);
                 if(sel != sw.selector){
-                    captures.put(sw, sw.selector);
+                    captures.put(tree, sw.selector);
                     sw.selector = sel;
                 }
                 if(needsTransform(sw.cases)) buildGuardPreDecls(sw.cases, buffer);
@@ -628,16 +622,16 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
         public <T extends JCTree> T translate(T tree){
             if(tree == null) return null;
             if(!isSwitchExpression(tree)) return super.translate(tree);
+            clearPatternSwitchStatus(tree);
 
             JCSwitchExpression sw = (JCSwitchExpression)tree;
-            clearPatternSwitchStatus(sw);
             make.at(sw.pos);
             JCExpression rawSel = captures.remove(sw);
             sw.selector = translate(sw.selector);
             sw.cases = translate(sw.cases);
 
             if(needsTransform(sw.cases)){
-                JCSwitch ns = transformSwitch(sw, sw.selector, sw.cases, true, rawSel);
+                JCSwitch ns = transformSwitch(tree, sw.selector, sw.cases, true, rawSel);
                 sw.selector = ns.selector;
                 sw.cases = ns.cases;
                 collectAccessorCalls();
@@ -668,21 +662,20 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
     }
 
 
-    public List<JCSwitchExpression> findPatternSwitches(JCTree node){
+    @SuppressWarnings("unchecked")
+    public List<JCTree> findPatternSwitches(JCTree node){
         ListBuffer<JCSwitchExpression> out = new ListBuffer<>();
         new TreeScanner<Void, Void>(){
             @Override
             public Void scan(Tree t, Void v){
                 if(t == null) return null;
-                if(isSwitchExpression(t)){
-                    JCSwitchExpression se = (JCSwitchExpression)t;
-                    if(needsTransform(se.cases)) out.append(se);
-                    return null;
-                }
-                return super.scan(t, v);
+                if(!isSwitchExpression((JCTree)t)) return super.scan(t, v);
+                JCSwitchExpression se = (JCSwitchExpression)t;
+                if(needsTransform(se.cases)) out.append(se);
+                return null;
             }
         }.scan(node, null);
-        return out.toList();
+        return (List<JCTree>)(List<? extends JCTree>)out.toList();
     }
 
     /** Builds the standard switch from a pattern/null switch. */
@@ -1000,6 +993,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
             JCLiteral lit = (JCLiteral)expr;
             switch (lit.typetag) {
                 case FLOAT:
+                    //TODO: use Float#floatToIntBits() result as a selector?
                 case DOUBLE: {
                     // Boxed.xxxxToxxxBits((Boxed)sel) == Boxed.xxxxToxxxBits(expr)
                     //TODO: cache sel result
@@ -1015,9 +1009,11 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
                 }
                 case CLASS: //$FALL-THROUGH$
                     break;
-                case LONG:
-                default:
+                case INT:
                     //TODO: we lost O(1) if there is only a null case. Let the compiler decide?
+                    //TODO2: process the same ways as JDK 17? (sel == null ? (sel != n ? sel : n+1) : n)
+                    //       where the null case is a value not used in labels, instead of -1.
+                default:
                     // sel == expr
                     return makeBinary(Tag.EQ, sel, expr);
             }
@@ -1298,7 +1294,7 @@ public class SwitchRetrofittingTaskListener implements TaskListener{
 
     private JCBinary makeBinary(JCTree.Tag optag, JCExpression lhs, JCExpression rhs){
         JCBinary tree = make.Binary(optag, copier.copy(lhs), rhs); //only copy left side
-        tree.operator = resolveBinary(ops, tree, optag, lhs.type, rhs.type);
+        tree.operator = HAS_OPERATORS ? resolveBinary((Operators)ops, tree, optag, lhs.type, rhs.type) : null;
         if(tree.operator != null) tree.type = types.erasure(tree.operator.type.getReturnType());
         return tree;
     }
