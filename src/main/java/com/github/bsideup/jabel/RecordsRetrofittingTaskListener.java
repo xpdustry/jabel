@@ -9,6 +9,7 @@ import com.sun.source.tree.*;
 import com.sun.source.util.*;
 import com.sun.source.util.TreeScanner;
 import com.sun.tools.javac.code.*;
+import com.sun.tools.javac.code.Symbol.*;
 import com.sun.tools.javac.tree.*;
 import com.sun.tools.javac.tree.JCTree.*;
 import com.sun.tools.javac.util.*;
@@ -72,8 +73,8 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
     public void generateToStringIfNeeded(JCClassDecl classDecl) {
         if(containsMethod(classDecl, names.toString)) return;
         classDecl.defs = classDecl.defs.append(make.MethodDef(
-            new Symbol.MethodSymbol(
-                Flags.PUBLIC,
+            new MethodSymbol(
+                Flags.PUBLIC | Flags.FINAL,
                 names.toString,
                 new Type.MethodType(
                     List.nil(),
@@ -83,15 +84,15 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
                 ),
                 syms.objectType.tsym
             ),
-            make.Block(0, generateToString(classDecl)))
-        );
+            make.Block(0, generateToString(classDecl))
+        ));
     }
 
     public void generateHashcodeIfNeeded(JCClassDecl classDecl) {
         if(containsMethod(classDecl, names.hashCode)) return;
         classDecl.defs = classDecl.defs.append(make.MethodDef(
-            new Symbol.MethodSymbol(
-                Flags.PUBLIC,
+            new MethodSymbol(
+                Flags.PUBLIC | Flags.FINAL,
                 names.hashCode,
                 new Type.MethodType(
                     List.nil(),
@@ -101,14 +102,15 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
                 ),
                 syms.objectType.tsym
             ),
-            make.Block(0, generateHashCode(classDecl)))
-        );
+            make.Block(0, generateHashCode(classDecl))
+        ));
     }
 
     public void generateEqualsIfNeeded(JCClassDecl classDecl) {
         if(containsMethod(classDecl, names.equals)) return;
-        Symbol.MethodSymbol methodSymbol = new Symbol.MethodSymbol(
-            Flags.PUBLIC | Flags.FINAL, names.equals,
+        MethodSymbol methodSymbol = new MethodSymbol(
+            Flags.PUBLIC | Flags.FINAL,
+            names.equals,
             new Type.MethodType(
                 List.of(syms.objectType),
                 syms.booleanType,
@@ -132,10 +134,11 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
             JCTree next = iterator.next();
             if (!(next instanceof JCMethodDecl)) continue;
             JCMethodDecl def = (JCMethodDecl)next;
-            if (def.getName() == name) return true;
-            if(name != names.equals || def.params.size() != 1) continue;
+            if (def.getName() != name) continue;
+            if(name != names.equals) return true;
+            if(def.params.size() != 1) continue;
             // TODO find a better way?
-            switch(def.params.get(0).getType().toString()){
+            switch(def.params.head.getType().toString()){
                 case "java.lang.Object":
                 case "Object":
                     return true;
@@ -165,30 +168,19 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
             JCVariableDecl fieldDecl = iterator.next();
             Name fieldName = fieldDecl.name;
 
-            stringBuilder = make.App(
-                make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-                List.of(make.Literal(fieldName + "="))
-            );
-
-            stringBuilder = make.App(
-                make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-                List.of(make.Select(make.This(Type.noType), fieldName))
-            );
-
+            stringBuilder = stringAppend(stringBuilder, make.Literal(fieldName + "="));
+            stringBuilder = stringAppend(stringBuilder, make.Select(make.This(Type.noType), fieldName));
             if(iterator.hasNext()){
-                stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-                    List.of(make.Literal(","))
-                );
+                stringBuilder = stringAppend(stringBuilder, make.Literal(", "));
             }
         }
-
-        stringBuilder = make.App(
-            make.Select(stringBuilder, names.append).setType(syms.stringBuilderType),
-            List.of(make.Literal("]"))
-        );
+        stringBuilder = stringAppend(stringBuilder, make.Literal("]"));
 
         return List.of(make.Return(make.App(make.Select(stringBuilder, names.toString).setType(syms.stringType))));
+    }
+
+    private JCMethodInvocation stringAppend(JCExpression builder, JCExpression arg) {
+        return make.App(make.Select(builder, names.append).setType(syms.stringBuilderType), List.of(arg));
     }
 
     public List<JCStatement> generateEquals(JCClassDecl classDecl, Name otherName){
@@ -230,7 +222,7 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
         // Create casted variable: ClassName other = (ClassName)o;
         Name thatName = names.fromString("other");
         statements.add(make.VarDef(
-            make.Modifiers(0L),
+            make.Modifiers(0),
             thatName,
             make.Ident(classDecl.name),
             make.TypeCast(make.Ident(classDecl.name), make.Ident(otherName))
@@ -279,57 +271,52 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
             JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
 
             if(fType instanceof JCPrimitiveTypeTree){
+                //TODO simplify that?
                 switch(((JCPrimitiveTypeTree)fType).getPrimitiveTypeKind()){
                     case BOOLEAN:
                         /* this.fieldName ? 1 : 0 */
-                        expressions.append(
-                            make.Conditional(
-                                myFieldAccess,
-                                make.Literal(TypeTag.INT, 1),
-                                make.Literal(TypeTag.INT, 0)
-                            )
-                        );
+                        expressions.append(make.Conditional(
+                            myFieldAccess,
+                            make.Literal(TypeTag.INT, 1),
+                            make.Literal(TypeTag.INT, 0)
+                        ));
                         break;
 
                     case LONG:
                         expressions.append(make.TypeCast(
                             make.TypeIdent(syms.intType.getTag()),
-                            make.Parens(
-                                make.Binary(
-                                    Tag.BITXOR,
-                                    myFieldAccess,
-                                    make.Parens(make.Binary(Tag.USR, myFieldAccess, make.Literal(32)))
-                                )
-                            )
+                            make.Parens(make.Binary(
+                                Tag.BITXOR,
+                                myFieldAccess,
+                                make.Parens(make.Binary(Tag.USR, myFieldAccess, make.Literal(32)))
+                            ))
                         ));
                         break;
 
                     case FLOAT:
                         /* this.fieldName != 0f ? Float.floatToIntBits(this.fieldName) : 0 */
-                        expressions.append(
-                            make.Conditional(
-                                make.Binary(Tag.NE, myFieldAccess, make.Literal(0f)),
-                                make.App(
-                                    make.Select(
-                                        make.QualIdent(types.boxedClass(syms.floatType)),
-                                        names.fromString("floatToIntBits")).setType(syms.intType),
-                                    List.of(myFieldAccess)
-                                ),
-                                make.Literal(TypeTag.INT, 0)
-                            )
-                        );
+                        expressions.append(make.Conditional(
+                            make.Binary(Tag.NE, myFieldAccess, make.Literal(0f)),
+                            make.App(
+                                make.Select(
+                                    make.QualIdent(types.boxedClass(syms.floatType)),
+                                    names.fromString("floatToIntBits")
+                                ).setType(syms.intType),
+                                List.of(myFieldAccess)
+                            ),
+                            make.Literal(TypeTag.INT, 0)
+                        ));
                         break;
 
                     case DOUBLE:
                         /* Double.hashCode(this.fieldName) */
-                        expressions.append(
-                            make.App(
-                                make.Select(
-                                    make.QualIdent(types.boxedClass(syms.doubleType)),
-                                    names.hashCode).setType(syms.intType),
-                                List.of(myFieldAccess)
-                            )
-                        );
+                        expressions.append(make.App(
+                            make.Select(
+                                make.QualIdent(types.boxedClass(syms.doubleType)),
+                                names.hashCode
+                            ).setType(syms.intType),
+                            List.of(myFieldAccess)
+                        ));
                         break;
 
                     case BYTE:
@@ -343,51 +330,43 @@ public class RecordsRetrofittingTaskListener implements TaskListener{
                 }
 
             }else if(fType instanceof JCArrayTypeTree){
-                expressions.append(
-                    make.App(
-                        make.Select(
-                            make.QualIdent(syms.arraysType.tsym),
-                            names.hashCode
-                        ).setType(syms.intType),
-                        List.of(myFieldAccess)
-                    )
-                );
+                expressions.append(make.App(
+                    make.Select(
+                        make.QualIdent(syms.arraysType.tsym),
+                        names.hashCode
+                    ).setType(syms.intType),
+                    List.of(myFieldAccess)
+                ));
 
             }else{
                 /* (this.fieldName != null ? this.fieldName.hashCode() : 0) */
-                expressions.append(
-                    make.Conditional(
-                        make.Binary(Tag.NE, myFieldAccess, make.Literal(TypeTag.BOT, null)),
-                        make.App(make.Select(myFieldAccess, names.hashCode).setType(syms.intType)),
-                        make.Literal(0)
-                    )
-                );
+                expressions.append(make.Conditional(
+                    make.Binary(Tag.NE, myFieldAccess, make.Literal(TypeTag.BOT, null)),
+                    make.App(make.Select(myFieldAccess, names.hashCode).setType(syms.intType)),
+                    make.Literal(0)
+                ));
             }
         }
 
         ListBuffer<JCStatement> statements = new ListBuffer<>();
         Name resultName = names.fromString("result");
-        statements.append(
-            make.VarDef(
-                make.Modifiers(0L),
-                resultName,
-                make.TypeIdent(syms.intType.getTag()),
-                make.Literal(0)
-            )
-        );
+        statements.append(make.VarDef(
+            make.Modifiers(0),
+            resultName,
+            make.TypeIdent(syms.intType.getTag()),
+            make.Literal(0)
+        ));
 
         for(JCExpression expression : expressions){
             // result = 31 * result + ${expr}
-            statements.append(make.Exec(
-                make.Assign(
-                    make.Ident(resultName),
-                    make.Binary(
-                        Tag.PLUS,
-                        make.Binary(Tag.MUL, make.Literal(TypeTag.INT, 31), make.Ident(resultName)),
-                        expression
-                    )
+            statements.append(make.Exec(make.Assign(
+                make.Ident(resultName),
+                make.Binary(
+                    Tag.PLUS,
+                    make.Binary(Tag.MUL, make.Literal(TypeTag.INT, 31), make.Ident(resultName)),
+                    expression
                 )
-            ));
+            )));
         }
 
         statements.append(make.Return(make.Ident(resultName)));
