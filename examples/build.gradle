@@ -1,7 +1,7 @@
 apply plugin: "java"
 
 repositories.mavenCentral()
-dependencies.annotationProcessor rootProject//.files("build/libs/jabel-${rootProject.version}.jar")
+dependencies.annotationProcessor rootProject.files("build/libs/jabel-${rootProject.version}.jar")
 
 // Force java 1.8
 compileJava{
@@ -9,13 +9,10 @@ compileJava{
     sourceCompatibility = JavaVersion.VERSION_25
     options.encoding = "UTF-8"
     options.release = 8
-    
-    // Needed to modify compiler options
-    //options.compilerArgs += "-Xplugin:jabel"
+
+    // For debugging
     options.fork = true
-    ["api", "code", "comp", "tree", "util"].each { 
-        options.forkOptions.jvmArgs += "--add-opens=jdk.compiler/com.sun.tools.javac." + it + "=ALL-UNNAMED" 
-    }
+    options.forkOptions.jvmArgs += "-XX:-OmitStackTraceInFastThrow"
 }
 
 sourceSets.main.java.srcDirs = ["src"]

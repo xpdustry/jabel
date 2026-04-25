@@ -1,4 +1,4 @@
-// Examples made by Claude Opus 4.5
+ // Examples made by Claude Opus 4.5
 
 /**
  * Examples of Java 14 features desugared by the compiler: <br>
@@ -85,8 +85,18 @@ public class Java14FeaturesExample {
         switch (day) {
             case SAT -> System.out.println("Saturday");
             case SUN -> System.out.println("Sunday");
-            default -> System.out.println("Weekday");
         }
+        System.out.println("Weekday");
+    }
+
+    void noDefaultInjectedCase(int a) {
+        switch (a) {
+            case 1 -> {
+                System.out.println("Wrong value!!");
+                return;
+            }
+        }
+        System.out.println("Passed!");
     }
 
     int[] asArrayElements(int a, int b) {

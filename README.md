@@ -19,11 +19,6 @@ as they were supported in Java 8.
 The result is a valid Java 8 bytecode for your switch expressions, `var` declarations,
 and other features unavailable in Java 8.
 
-> [!NOTE]
-> Also please note that Jabel makes his best to adapt the syntax transformation, according to the currently used JDK. <br>
-> Jabel has been tested with Oracle's ones, on versions 8, 9, 12, 16, 17, 19, 21 and 25. <br>
-> In the vast majority of cases, everything works correctly. However, if you encounter a problem with another kind or version of JDK, feel free to [open an issue](https://github.com/xpdustry/jabel/issues/new).
-
 
 ## Why it works
 The JVM has evolved a lot for the past years. However, most language features
@@ -40,42 +35,62 @@ It is important to understand that it will use the same desugaring code as for J
 the result's classfile version, because the compilation phase will be done with Java 8 target.
 
 
+## Limitations
+Please remember that Jabel is not magic! It does its best to adapt the syntax transformation, according to the currently used JDK. <br>
+So yes, in specific cases, the syntax transformation is more efficient than the compiler's, but most of the time, it's not as efficient as JDK+JVM implementation. 
+
+Jabel has been tested with Oracle JDKs, on versions 8, 9, 12, 16, 17, 19, 21 and 25. <br>
+In the vast majority of cases, everything works correctly. However, if you encounter a problem with another version or JDK, feel free to [open an issue](https://github.com/xpdustry/jabel/issues/new).
+
+
 ## How to use
-### Gradle 6 or older
+### Gradle
 Use the following snippet to add Jabel to your Gradle build:
 ```gradle
 repositories {
-    maven { url 'https://maven.xpdustry.com/mindustry' }
+    maven { url "https://maven.xpdustry.com/releases" }
 }
 
 dependencies {
-    annotationProcessor 'com.xpdustry:jabel:1.1.0'
+    annotationProcessor "com.xpdustry:jabel:1.1.0"
 }
 
-// Add more tasks if needed, such as compileTestJava
 compileJava {
-    sourceCompatibility = 14 // for the IDE support
+    sourceCompatibility = 16 // for the IDE support
+    options.release = 8
 
-    options.compilerArgs = [
-        "--release", "8",
-    ]
+    javaCompiler = javaToolchains.compilerFor {
+        languageVersion = JavaLanguageVersion.of(16)
+    }
+    
+    // Can be omitted on Java 14 and higher
+    options.compilerArgs += "-Xplugin:jabel"
+}
+```
 
-    doFirst {
-        // Can be omitted on Java 14 and higher
-        options.compilerArgs << '-Xplugin:jabel'
-        
-        // Needed to get access to internal compiler classes
-        options.fork = true
-        ["api", "code", "comp", "tree", "util"].each { 
-            options.forkOptions.jvmArgs << "--add-opens=jdk.compiler/com.sun.tools.javac." + it + "=ALL-UNNAMED" 
-        }
+Short version:
+```gradle
+repositories { maven { url "https://maven.xpdustry.com/releases" } }
+dependencies.annotationProcessor "com.xpdustry:jabel:1.1.0"
+compileJava.options.release = 8
+```
+
+You can also force your tests to run with Java 8:
+```gradle
+compileTestJava {
+    sourceCompatibility = targetCompatibility = 8
+}
+
+test {
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
     }
 }
 ```
 
 Compile your project and verify that the result is still a valid Java 8 bytecode (52.0):
 ```shell script
-$ ./gradlew --no-daemon clean :example:run
+$ ./gradlew --no-daemon clean :examples:run
 
 > Task :examples:run
 === Jabel Feature Examples ===
@@ -123,52 +138,10 @@ Unnamed variables work!
 ComplexPrologue: value=20
 ManyLocals: value=14 label=10/4 ratio=2.5
 SpoofChild: value=99 spoofed=false
+Implicit classes work!
 
 === All features work! ===
 
 BUILD SUCCESSFUL in 32s
 7 actionable tasks: 7 executed
-```
-
-### Gradle 7 and newer
-Gradle 7 supports toolchains and makes it extremely easy to configure everything:
-```gradle
-repositories {
-    maven { url 'https://maven.xpdustry.com/mindustry' }
-}
-
-dependencies {
-    annotationProcessor 'com.xpdustry:jabel:1.1.0'
-}
-
-compileJava {
-    sourceCompatibility = 16 // for the IDE support
-    options.release = 8
-
-    javaCompiler = javaToolchains.compilerFor {
-        languageVersion = JavaLanguageVersion.of(16)
-    }
-    
-    // Can be omitted on Java 14 and higher
-    options.compilerArgs += "-Xplugin:jabel"
-    
-    // Needed to get access to internal compiler classes
-    options.fork = true
-    ["api", "code", "comp", "tree", "util"].each { 
-        options.forkOptions.jvmArgs += "--add-opens=jdk.compiler/com.sun.tools.javac." + it + "=ALL-UNNAMED" 
-    }
-}
-```
-
-You can also force your tests to run with Java 8:
-```gradle
-compileTestJava {
-    sourceCompatibility = targetCompatibility = 8
-}
-
-test {
-    javaLauncher = javaToolchains.launcherFor {
-        languageVersion = JavaLanguageVersion.of(8)
-    }
-}
 ```

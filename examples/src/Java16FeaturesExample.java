@@ -57,6 +57,7 @@ public class Java16FeaturesExample {
             Objects.requireNonNull(name);
             if (age < 0) throw new IllegalArgumentException();
         }
+
     }
 
     record MultipleTypes(boolean bool, byte b, short s, int i, long l,
@@ -68,7 +69,7 @@ public class Java16FeaturesExample {
 
       @Override
       public String str() {
-          return "different string.";
+          return "different string: " + str;
       }
     }
 

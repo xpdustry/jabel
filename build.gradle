@@ -18,7 +18,7 @@ repositories{
 javadoc.options{
     addStringOption("Xdoclint:none", "-quiet")
     addStringOption("-source", "25")
-    ["api", "code", "comp", "tree", "util"].each { 
+    ["api", "code", "comp", "tree", "util", "jvm"].each { 
         addBooleanOption("-add-exports=jdk.compiler/com.sun.tools.javac." + it + "=ALL-UNNAMED", true) 
     }
 }

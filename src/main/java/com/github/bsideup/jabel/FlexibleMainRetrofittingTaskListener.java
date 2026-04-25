@@ -148,8 +148,18 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
         return (m.mods.flags & Flags.STATIC) != 0;
     }
 
+    // Because JCDiagnostic.DiagnosticInfo doesn't exists in Java 8
+    private static class WarnMaker {
+        static JCDiagnostic.DiagnosticInfo make(String key, Object arg) {
+            return new JCDiagnostic.Warning("jabel", key, arg);
+        }
+    }
+
     private void warn(JCMethodDecl method, String key, Object arg){
-        log.report(diagFactory.create(log.currentSource(), method, new JCDiagnostic.Warning("jabel", key, arg)));
+        try{
+            log.report(diagFactory.create(log.currentSource(), method, WarnMaker.make(key, arg)));
+        // At this point nothing can be patched, so we don't care at all
+        }catch(NoClassDefFoundError ignored){}
     }
 
     public boolean isMain(JCMethodDecl method){
@@ -158,10 +168,16 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener{
         if(((JCPrimitiveTypeTree)method.restype).typetag != TypeTag.VOID) return false;
         if(method.params.isEmpty()) return true;
         if(method.params.size() != 1) return false;
-        JCTree vartype = method.params.get(0).vartype;
+        JCTree vartype = method.params.head.vartype;
         if(!(vartype instanceof JCArrayTypeTree)) return false;
-        String elem = ((JCArrayTypeTree)vartype).elemtype.toString();
-        return elem.equals("String") || elem.endsWith(".String");
+        // TODO find a better way?
+        switch(((JCArrayTypeTree)vartype).getType().toString()){
+            case "java.lang.String":
+            case "String":
+                return true;
+            default:
+                return false;
+        }
     }
 
     /** If {@code toLocalMain} is {@code true}, a zero-arg constructor must be present. */
