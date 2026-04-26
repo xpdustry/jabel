@@ -27,6 +27,7 @@ class Main {
         var java14 = new Java14FeaturesExample();
         System.out.println("Switch expression: " + java14.switchMultipleLabels(Java14FeaturesExample.Day.SAT));
         System.out.println("Switch with yield: " + java14.switchExpressionWithYield(Java14FeaturesExample.Day.WED));
+        java14.noDefaultInjectedCase(16);
 
         System.out.println("\n--- Java 15 Features ---");
         var java15 = new Java15FeaturesExample();
@@ -36,7 +37,7 @@ class Main {
         var java16 = new Java16FeaturesExample();
         java16.patternMatchingInstanceof("Hello");
         var point = new Java16FeaturesExample.Point(3, 4);
-        System.out.println("Record: " + point);
+        System.out.println("Record: " + point + " (" + point.x() + ", " + point.y() + ")");
 
         System.out.println("\n--- Java 17 Features ---");
         var java17 = new Java17FeaturesExample();
@@ -47,6 +48,7 @@ class Main {
         var java21 = new Java21FeaturesExample();
         System.out.println("case null: " + java21.caseNull(null));
         System.out.println("pattern switch: " + java21.patternSwitch("test"));
+        System.out.println("pattern switch statement: " + java21.patternSwitchVariable("test"));
         System.out.println("record pattern: " + java21.recordPatternSwitchStatement(new Java21FeaturesExample.Point(5, 7)));
         System.out.println("switch yield: " + java21.switchYield("hello"));
 

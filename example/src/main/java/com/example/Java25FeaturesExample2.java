@@ -1,6 +1,5 @@
 /**
  * Examples of Java 25 features with manual desugaring: <br>
-
  * <strong>IMPLICIT_CLASSES</strong>
  * <pre>
  * // Source (Java 25+):

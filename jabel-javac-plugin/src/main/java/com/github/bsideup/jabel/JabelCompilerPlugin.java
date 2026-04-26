@@ -1,72 +1,38 @@
 package com.github.bsideup.jabel;
 
-import com.sun.source.util.JavacTask;
-import com.sun.source.util.Plugin;
-import com.sun.tools.javac.api.BasicJavacTask;
-import com.sun.tools.javac.code.Source;
+import java.util.*;
+
+import com.sun.source.util.*;
+import com.sun.tools.javac.api.*;
+import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.util.*;
 
-import net.bytebuddy.ByteBuddy;
-import net.bytebuddy.agent.ByteBuddyAgent;
-import net.bytebuddy.asm.Advice;
-import net.bytebuddy.asm.AsmVisitorWrapper;
-import net.bytebuddy.description.field.FieldDescription;
-import net.bytebuddy.description.field.FieldList;
-import net.bytebuddy.description.method.MethodList;
-import net.bytebuddy.description.type.TypeDescription;
-import net.bytebuddy.dynamic.ClassFileLocator;
-import net.bytebuddy.dynamic.loading.ClassInjector;
-import net.bytebuddy.dynamic.loading.ClassReloadingStrategy;
-import net.bytebuddy.dynamic.scaffold.MethodGraph;
-import net.bytebuddy.implementation.Implementation;
-import net.bytebuddy.jar.asm.ClassVisitor;
-import net.bytebuddy.jar.asm.MethodVisitor;
-import net.bytebuddy.jar.asm.Opcodes;
-import net.bytebuddy.pool.TypePool;
-import net.bytebuddy.utility.JavaModule;
-
-import java.util.*;
+import net.bytebuddy.*;
+import net.bytebuddy.agent.*;
+import net.bytebuddy.asm.*;
+import net.bytebuddy.description.type.*;
+import net.bytebuddy.dynamic.*;
+import net.bytebuddy.dynamic.loading.*;
+import net.bytebuddy.dynamic.scaffold.*;
+import net.bytebuddy.pool.*;
+import net.bytebuddy.utility.*;
 
 import static net.bytebuddy.matcher.ElementMatchers.*;
 
 
 public class JabelCompilerPlugin implements Plugin {
-    static {
-        boolean c = false;
+    static final boolean JABEL_INITIALIZED = initJabel();
+
+    @SuppressWarnings("resource")
+    private static boolean initJabel() {
+        // We cannot easily force features bellow Java 10.35
         try {
             Class.forName("com.sun.tools.javac.code.Source$Feature");
-            c = true;
-        } catch (Exception e) {}
-        final boolean canPatchSources = c;
+        } catch (Exception e) {
+            return false;
+        }
 
-        Map<String, AsmVisitorWrapper> visitors = new HashMap<String, AsmVisitorWrapper>() {{
-            if (canPatchSources) {
-                // Disable the preview feature check
-                AsmVisitorWrapper checkSourceLevelAdvice = Advice.to(CheckSourceLevelAdvice.class)
-                        .on(named("checkSourceLevel").and(takesArguments(2)));
-
-                // Allow features that were introduced together with Records (local enums, static inner members, ...)
-                AsmVisitorWrapper allowRecordsEraFeaturesAdvice = new FieldAccessStub("allowRecords", true);
-
-                put("com.sun.tools.javac.parser.JavacParser",
-                        new AsmVisitorWrapper.Compound(
-                                checkSourceLevelAdvice,
-                                allowRecordsEraFeaturesAdvice
-                        )
-                );
-                put("com.sun.tools.javac.parser.JavaTokenizer", checkSourceLevelAdvice);
-
-                put("com.sun.tools.javac.comp.Check", allowRecordsEraFeaturesAdvice);
-                put("com.sun.tools.javac.comp.Attr", allowRecordsEraFeaturesAdvice);
-                put("com.sun.tools.javac.comp.Resolve", allowRecordsEraFeaturesAdvice);
-
-                // Lower the source requirement for supported features
-                AsmVisitorWrapper allowedInSourceAdvice = Advice.to(AllowedInSourceAdvice.class)
-                        .on(named("allowedInSource").and(takesArguments(1)));
-                put("com.sun.tools.javac.code.Source$Feature", allowedInSourceAdvice);
-            }
-        }};
-
+        // Install ByteBuddy
         try {
             ByteBuddyAgent.install();
         } catch (Exception e) {
@@ -81,58 +47,65 @@ public class JabelCompilerPlugin implements Plugin {
                     )
             );
         }
+        ByteBuddy byteBuddy = new ByteBuddy().with(MethodGraph.Compiler.ForDeclaredMethods.INSTANCE);
 
-        ByteBuddy byteBuddy = new ByteBuddy()
-                .with(MethodGraph.Compiler.ForDeclaredMethods.INSTANCE);
 
+        // Hook classes
         ClassLoader classLoader = JavacTask.class.getClassLoader();
         ClassFileLocator classFileLocator = ClassFileLocator.ForClassLoader.of(classLoader);
         TypePool typePool = TypePool.ClassLoading.of(classLoader);
+        TypeDescription clazz;
 
-        visitors.forEach((className, visitor) -> {
-            byteBuddy
-                    .decorate(
-                            typePool.describe(className).resolve(),
-                            classFileLocator
-                    )
-                    .visit(visitor)
-                    .make()
-                    .load(classLoader, ClassReloadingStrategy.fromInstalledAgent());
-        });
+        // Lower features source level
+        clazz = typePool.describe("com.sun.tools.javac.code.Source$Feature").resolve();
+        byteBuddy.decorate(clazz, classFileLocator)
+                 .visit(Advice.to(AllowedInSourceAdvice.class).on(named("allowedInSource").and(takesArguments(1))))
+                 .make()
+                 .load(classLoader, ClassReloadingStrategy.fromInstalledAgent());
 
-        try {
-            JavaModule jabelModule = JavaModule.ofType(JabelCompilerPlugin.class);
-            ClassInjector.UsingInstrumentation.redefineModule(
-                    ByteBuddyAgent.getInstrumentation(),
-                    JavaModule.ofType(JavacTask.class),
-                    Collections.emptySet(),
-                    Collections.emptyMap(),
-                    new HashMap<String, java.util.Set<JavaModule>>() {{
-                        put("com.sun.tools.javac.api", Collections.singleton(jabelModule));
-                        put("com.sun.tools.javac.tree", Collections.singleton(jabelModule));
-                        put("com.sun.tools.javac.code", Collections.singleton(jabelModule));
-                        put("com.sun.tools.javac.comp", Collections.singleton(jabelModule));
-                        put("com.sun.tools.javac.util", Collections.singleton(jabelModule));
-                    }},
-                    Collections.emptySet(),
-                    Collections.emptyMap()
-            );
-        // In case of we are running on Java 8
-        } catch (NullPointerException ignored) {}
+        // Force enable preview features and suppress its warnings
+        clazz = typePool.describe("com.sun.tools.javac.code.Preview").resolve();
+        byteBuddy.decorate(clazz, classFileLocator)
+                 .visit(Advice.to(IsEnabledAdvice.class).on(named("isEnabled").and(takesArguments(0))))
+                 .visit(Advice.to(IsPreviewAdvice.class).on(named("isPreview").and(takesArguments(1))))
+                 .visit(Advice.to(WarnPreviewAdvice.class).on(named("warnPreview")))
+                 .make()
+                 .load(classLoader, ClassReloadingStrategy.fromInstalledAgent());
+
+
+        // Open internal compiler packages
+        Set<JavaModule> jabelModule = Collections.singleton(JavaModule.ofType(JabelCompilerPlugin.class));
+        ClassInjector.UsingInstrumentation.redefineModule(
+                ByteBuddyAgent.getInstrumentation(),
+                JavaModule.ofType(JavacTask.class),
+                Collections.emptySet(),
+                Collections.emptyMap(),
+                new HashMap<String, Set<JavaModule>>() {{
+                    put("com.sun.tools.javac.api", jabelModule);
+                    put("com.sun.tools.javac.tree", jabelModule);
+                    put("com.sun.tools.javac.code", jabelModule);
+                    put("com.sun.tools.javac.comp", jabelModule);
+                    put("com.sun.tools.javac.util", jabelModule);
+                }},
+                Collections.emptySet(),
+                Collections.emptyMap()
+        );
+
+        return true;
     }
 
     @Override
     public void init(JavacTask task, String... args) {
+        // Useless to continue if Jabel was not initialized correctly
+        if (!JABEL_INITIALIZED) return;
+
         Context context = ((BasicJavacTask) task).getContext();
         removeUnderscoreWarnings(context);
 
         task.addTaskListener(new RecordsRetrofittingTaskListener(context));
-        task.addTaskListener(new InstanceofRetrofittingTaskListener(context));
+        task.addTaskListener(new RecordPatternRetrofittingTaskListener(context));
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
-        try {
-            task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
-        // Because JCDiagnostic.Warning doesn't exists on Java 8. But we don't care at this point
-        } catch (NoClassDefFoundError ignored) {}
+        task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
         task.addTaskListener(new ImplicitClassesFixerTaskListener(context));
     }
 
@@ -142,17 +115,16 @@ public class JabelCompilerPlugin implements Plugin {
     }
 
     /** Make it auto starts on Java 14+. */
+    @Override
     public boolean autoStart() {
         return true;
     }
 
     /** Removes warnings about {@code '_'}. */
-    private static void removeUnderscoreWarnings(Context context) {
-        // Need to inherit a class instead.
-        // This is due to DeferredDiagnosticHandler(Predicate) being DeferredDiagnosticHandler(Filter) on Java 16-
-        Log.instance(context).new DiscardDiagnosticHandler() {
+    static void removeUnderscoreWarnings(Context context){
+        Log.instance(context).new DiscardDiagnosticHandler(){
             @Override
-            public void report(JCDiagnostic diag) {
+            public void report(JCDiagnostic diag){
                 String code = diag.getCode();
                 if (code.contains("underscore.as.identifier") ||
                     code.contains("use.of.underscore.not.allowed")) return;
@@ -161,6 +133,7 @@ public class JabelCompilerPlugin implements Plugin {
         };
     }
 
+    /** Makes all {@link Source.Feature} available in all source levels, except few ones. */
     static class AllowedInSourceAdvice {
         @Advice.OnMethodEnter
         static void allowedInSource(
@@ -180,47 +153,29 @@ public class JabelCompilerPlugin implements Plugin {
         }
     }
 
-    static class CheckSourceLevelAdvice {
-        @Advice.OnMethodEnter
-        static void checkSourceLevel(
-                @Advice.Argument(value = 1, readOnly = false) Source.Feature feature
-        ) {
-            if (feature.allowedInSource(Source.JDK8)) {
-                // This must be one of the cases from "AllowedInSourceAdvice"
-                //noinspection UnusedAssignment
-                feature = Source.Feature.PRIVATE_SAFE_VARARGS;
-            }
+    /** Makes {@link Preview#isEnabled()} always return {@code true}. */
+    static class IsEnabledAdvice {
+        @Advice.OnMethodExit
+        static void isEnabled(@Advice.Return(readOnly = false) boolean result) {
+            //noinspection UnusedAssignment
+            result = true;
         }
     }
 
-    private static class FieldAccessStub extends AsmVisitorWrapper.AbstractBase {
-        final String fieldName;
-        final Object value;
-
-        public FieldAccessStub(String fieldName, Object value) {
-            this.fieldName = fieldName;
-            this.value = value;
+    /** Makes {@link Preview#isPreview(Feature)} always return {@code false}. */
+    static class IsPreviewAdvice {
+        @Advice.OnMethodExit
+        static void isPreview(@Advice.Return(readOnly = false) boolean result) {
+            //noinspection UnusedAssignment
+            result = false;
         }
+    }
 
-        @Override
-        public ClassVisitor wrap(TypeDescription instrumentedType, ClassVisitor classVisitor, Implementation.Context implementationContext, TypePool typePool, FieldList<FieldDescription.InDefinedShape> fields, MethodList<?> methods, int writerFlags, int readerFlags) {
-            return new ClassVisitor(Opcodes.ASM9, classVisitor) {
-                @Override
-                public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
-                    MethodVisitor methodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
-                    return new MethodVisitor(Opcodes.ASM9, methodVisitor) {
-                        @Override
-                        public void visitFieldInsn(int opcode, String owner, String name, String descriptor) {
-                            if (opcode == Opcodes.GETFIELD && fieldName.equalsIgnoreCase(name)) {
-                                super.visitInsn(Opcodes.POP);
-                                super.visitLdcInsn(value);
-                            } else {
-                                super.visitFieldInsn(opcode, owner, name, descriptor);
-                            }
-                        }
-                    };
-                }
-            };
+    /** Makes {@link Preview#warnPreview(DiagnosticPosition, Feature)} a no-op. */
+    static class WarnPreviewAdvice {
+        @Advice.OnMethodEnter(skipOn = Advice.OnNonDefaultValue.class)
+        static boolean warnPreview() {
+            return true; // skip method body
         }
     }
 }

@@ -156,7 +156,7 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
                         .filter(it -> !it.getModifiers().getFlags().contains(Modifier.STATIC));
     }
 
-    public List<JCStatement> generateToString(JCClassDecl classDecl) {
+    public List<JCStatement> generateToString(JCClassDecl classDecl){
         JCExpression stringBuilder = make.NewClass(
                 null,
                 null,
@@ -165,43 +165,23 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
                 null
         );
 
-        for (
-                Iterator<JCVariableDecl> iterator = getRecordComponents(classDecl).iterator();
-                iterator.hasNext();
-        ) {
+        for(Iterator<JCVariableDecl> iterator = getRecordComponents(classDecl).iterator(); iterator.hasNext();){
             JCVariableDecl fieldDecl = iterator.next();
             Name fieldName = fieldDecl.name;
 
-            stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append)
-                        .setType(syms.stringBuilderType),
-                    List.of(make.Literal(fieldName + "="))
-            );
-
-            stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append)
-                        .setType(syms.stringBuilderType),
-                    List.of(make.Select(make.This(Type.noType), fieldName))
-            );
-
-            if (!iterator.hasNext()) break;
-            stringBuilder = make.App(
-                    make.Select(stringBuilder, names.append)
-                        .setType(syms.stringBuilderType),
-                    List.of(make.Literal(", "))
-            );
+            stringBuilder = stringAppend(stringBuilder, make.Literal(fieldName + "="));
+            stringBuilder = stringAppend(stringBuilder, make.Select(make.This(Type.noType), fieldName));
+            if(iterator.hasNext()){
+                stringBuilder = stringAppend(stringBuilder, make.Literal(", "));
+            }
         }
+        stringBuilder = stringAppend(stringBuilder, make.Literal("]"));
 
-        stringBuilder = make.App(
-                make.Select(stringBuilder, names.append)
-                    .setType(syms.stringBuilderType),
-                List.of(make.Literal("]"))
-        );
+        return List.of(make.Return(make.App(make.Select(stringBuilder, names.toString).setType(syms.stringType))));
+    }
 
-        return List.of(make.Return(make.App(
-                make.Select(stringBuilder, names.toString)
-                    .setType(syms.stringType)
-        )));
+    private JCMethodInvocation stringAppend(JCExpression builder, JCExpression arg) {
+        return make.App(make.Select(builder, names.append).setType(syms.stringBuilderType), List.of(arg));
     }
 
     public List<JCStatement> generateEquals(JCClassDecl classDecl, Name otherName) {
@@ -233,14 +213,8 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
         statements.add(make.If(
                 make.Binary(
                         Tag.EQ,
-                        make.App(make.Select(
-                                make.Ident(otherName),
-                                names.getClass
-                        ).setType(syms.classType)),
-                        make.App(make.Select(
-                                make.This(Type.noType),
-                                names.getClass
-                        ).setType(syms.classType))
+                        make.App(make.Select(make.Ident(otherName), names.getClass).setType(syms.classType)),
+                        make.App(make.Select(make.This(Type.noType), names.getClass).setType(syms.classType))
                 ),
                 make.Block(0, List.nil()),
                 make.Return(make.Literal(false))
@@ -249,7 +223,7 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
         // Create casted variable: ClassName other = (ClassName)o;
         Name thatName = names.fromString("other");
         statements.add(make.VarDef(
-                make.Modifiers(0L),
+                make.Modifiers(0),
                 thatName,
                 make.Ident(classDecl.name),
                 make.TypeCast(make.Ident(classDecl.name), make.Ident(otherName))
@@ -303,6 +277,7 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
             JCExpression myFieldAccess = make.Select(make.This(Type.noType), fieldDecl.name);
 
             if (fType instanceof JCPrimitiveTypeTree) {
+                //TODO simplify that?
                 switch (((JCPrimitiveTypeTree) fType).getPrimitiveTypeKind()) {
                     case BOOLEAN:
                         /* this.fieldName ? 1 : 0 */
@@ -385,7 +360,7 @@ public class RecordsRetrofittingTaskListener implements TaskListener {
         ListBuffer<JCStatement> statements = new ListBuffer<>();
         Name resultName = names.fromString("result");
         statements.append(make.VarDef(
-                make.Modifiers(0L),
+                make.Modifiers(0),
                 resultName,
                 make.TypeIdent(syms.intType.getTag()),
                 make.Literal(0)

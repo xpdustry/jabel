@@ -59,19 +59,20 @@ public class Java16FeaturesExample {
             Objects.requireNonNull(name);
             if (age < 0) throw new IllegalArgumentException();
         }
+
     }
 
     record MultipleTypes(boolean bool, byte b, short s, int i, long l,
                          float f, double d, String str, Point p) {
-        @Override
-        public boolean equals(java.lang.Object o) {
-            return this == o;
-        }
+      @Override
+      public boolean equals(Object o) {
+          return this == o;
+      }
 
-        @Override
-        public String str() {
-            return "nothing";
-        }
+      @Override
+      public String str() {
+          return "different string: " + str;
+      }
     }
 
     void patternMatchingInstanceof(Object obj) {

@@ -53,7 +53,7 @@ public class Java9FeaturesExample {
 
     @SafeVarargs
     private final void safeVarargsMethod(List<String>... lists) {
-        for (var list : lists) System.out.println(list);
+        for (List<String> list : lists) System.out.println(list);
     }
 
     List<String> diamondWithAnonymous = new ArrayList<>() {

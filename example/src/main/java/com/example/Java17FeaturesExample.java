@@ -16,7 +16,6 @@ package com.example;
  * public abstract class Shape { }  // sealed, permits removed
  * public final class Circle extends Shape { }
  * public class Square extends Shape { }  // non-sealed removed
- * // Note: PermittedSubclasses bytecode attribute must be removed
  * </pre>
  * <p>
  * <strong>REDUNDANT_STRICTFP</strong>
@@ -25,6 +24,16 @@ package com.example;
  * public strictfp class Math { }
  *
  * // Decompiled (Java 8): same code (strictfp kept but redundant since Java 17)
+ * </pre>
+ * <p>
+ * <strong>PATTERN_SWITCH (preview since JDK 17)</strong>
+ * <pre>
+ * // Source (Java 17+ preview):
+ * switch (obj) {
+ *     case String s -> s.length();
+ *     case Integer i -> i;
+ *     default -> 0;
+ * }
  * </pre>
  */
 public class Java17FeaturesExample {

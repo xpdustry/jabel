@@ -168,9 +168,15 @@ public class FlexibleMainRetrofittingTaskListener implements TaskListener {
         if (method.params.isEmpty()) return true;
         if (method.params.size() != 1) return false;
         JCTree vartype = method.params.get(0).vartype;
-        if (!(vartype instanceof JCArrayTypeTree)) return false;
-        String elem = ((JCArrayTypeTree) vartype).elemtype.toString();
-        return elem.equals("String") || elem.endsWith(".String");
+        if(!(vartype instanceof JCArrayTypeTree)) return false;
+        // TODO find a better way?
+        switch(((JCArrayTypeTree)vartype).getType().toString()){
+            case "java.lang.String":
+            case "String":
+                return true;
+            default:
+                return false;
+        }
     }
 
     /** If {@code toLocalMain} is {@code true}, a zero-arg constructor must be present. */

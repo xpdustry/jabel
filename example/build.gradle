@@ -2,8 +2,9 @@ plugins {
     id "java"
 }
 
-configure([tasks.compileJava]) {
+compileJava {
     sourceCompatibility = 25
+    targetCompatibility = 8
     options.release = 8
 
     javaCompiler = javaToolchains.compilerFor {
@@ -22,7 +23,7 @@ test {
 }
 
 dependencies {
-    annotationProcessor project(":jabel-javac-plugin")
+    annotationProcessor project(":jabel-javac-plugin")//.files("build/libs/jabel-javac-plugin.jar")
 
     testImplementation 'junit:junit:4.13.2'
 }

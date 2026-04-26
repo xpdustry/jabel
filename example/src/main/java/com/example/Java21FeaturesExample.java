@@ -2,11 +2,11 @@
 
 package com.example;
 
-
 /**
  * Examples of Java 21 features with manual desugaring: <br>
  *
  * <strong>CASE_NULL</strong>
+ *
  * <pre>
  * // Source (Java 21+):
  * switch (str) {
@@ -16,16 +16,15 @@ package com.example;
  * }
  *
  * // Decompiled (Java 8):
- * if (str == null) {
- *     return "null";
- * }
- * switch (str) {
- *     case "a": return "A";
+ * switch (str == null ? -1 : str.equals("a") ? 0 : 1) {
+ *     case -1: return "null";
+ *     case 0: return "A";
  *     default: return "other";
  * }
  * </pre>
  * <p>
  * <strong>PATTERN_SWITCH</strong>
+ *
  * <pre>
  * // Source (Java 21+):
  * switch (obj) {
@@ -35,18 +34,21 @@ package com.example;
  * }
  *
  * // Decompiled (Java 8):
- * if (obj instanceof String) {
- *     String s = (String) obj;
- *     return s.length();
- * } else if (obj instanceof Integer) {
- *     Integer i = (Integer) obj;
- *     return i;
- * } else {
- *     return 0;
+ * switch (Objects.requireNonNull(obj) instanceof String ? 0 : obj instanceof Integer ? 1 : 2) {
+ *     case 0: {
+ *         String s = (String) obj;
+ *         return s.length();
+ *     }
+ *     case 1: {
+ *         Integer i = (Integer) obj;
+ *         return i;
+ *     }
+ *     default: return 0;
  * }
  * </pre>
  * <p>
  * <strong>RECORD_PATTERNS</strong>
+ *
  * <pre>
  * // Source (Java 21+):
  * if (obj instanceof Point(int x, int y)) {
@@ -63,9 +65,11 @@ package com.example;
  * </pre>
  * <p>
  * <strong>UNCONDITIONAL_PATTERN_IN_INSTANCEOF</strong>
+ *
  * <pre>
  * // Source (Java 21+):
- * if (str instanceof CharSequence cs) { }  // always true for non-null
+ * if (str instanceof CharSequence cs) {
+ * } // always true for non-null
  *
  * // Decompiled (Java 8):
  * if (str != null) {
@@ -74,18 +78,87 @@ package com.example;
  * </pre>
  */
 public class Java21FeaturesExample {
+    public enum InitDeadlockTest {
+        START, END;
 
-    sealed interface Geometry permits Point, Triangle, Shape{}
-    record Point(int x, int y) implements Geometry {}
-    record Triangle(Point a, Point b, Point c) implements Geometry {}
-    record Shape(String name, Triangle triangle) implements Geometry {}
+        static final String MSG = describe(START);
 
-    class Builder{
-        public int n;
-        public Builder build(Object o){
+        static String describe(InitDeadlockTest dz) {
+            return switch (dz) {
+                case START -> "starting";
+                case END -> "ending";
+                case null -> "unknown";
+            };
+        }
+    }
+
+    enum Day {
+        MON, TUE, WED, THU, FRI, SAT, SUN
+    }
+
+    sealed interface Geometry permits Point, Triangle, Shape {
+    }
+
+    record Point(int x, int y) implements Geometry {
+    }
+
+    record Triangle(Point a, Point b, Point c) implements Geometry {
+    }
+
+    record Shape(String name, Triangle triangle) implements Geometry {
+    }
+
+    class Builder {
+        public int n = InitDeadlockTest.START.ordinal();
+
+        public Builder build(Object o) {
             n++;
             return this;
         }
+    }
+
+    String enumWithNull(Day day) {
+        return switch (day) {
+            case SAT, Day.SUN -> "weekend";
+            case null -> "<unknown>";
+            case MON, TUE, WED, THU, FRI -> "weekday";
+        };
+    }
+
+    String enumWithNullAndPattern(Day day) {
+        return switch (day) {
+            case SAT, Day.SUN -> "weekend";
+            case null -> "<unknown>";
+            case MON, TUE, WED, THU, FRI -> "weekday";
+            case Day d -> "not possible: " + d;
+        };
+    }
+
+    String numberWithNull(Float day) {
+        return switch (day) {
+            case 6f, 7f -> "weekend";
+            case null -> "<unknown>";
+            case 1f, 2f, 3f, 4f, 5f -> "weekday";
+            case Float f when f < 0 -> (day = 10f) + " ";
+            default -> "<not a day>";
+        };
+    }
+
+    String number(Float day) {
+        return switch (day) {
+            case 6f, 7f -> "weekend";
+            case 1f, 2f, 3f, 4f, 5f -> "weekday";
+            default -> "<not a day>";
+        };
+    }
+
+    String classicWithNull(Integer day) {
+        return switch (day) {
+            case 6, 7 -> "weekend";
+            case null -> "<unknown>";
+            case 1, 2, 3, 4, 5 -> "weekday";
+            default -> "<not a day>";
+        };
     }
 
     String caseNull(String input) {
@@ -103,10 +176,36 @@ public class Java21FeaturesExample {
         };
     }
 
+    String mixedCaseType(Object msg) {
+        String v;
+        switch (msg) {
+            case Day.MON:
+                v = "Monday?";
+                break;
+            case Point(int x, int y) when x > 100:
+                v = "Far away at " + x + "," + y;
+            case null:
+                throw new RuntimeException();
+            case String s:
+                v = "Message: " + s;
+            default:
+                v = "Other";
+        }
+        return v;
+    }
+
     String patternSwitch(Object obj) {
         return switch (obj) {
             case String s -> "String: " + s;
             case Integer i -> "Integer: " + i;
+            default -> throw new IllegalArgumentException(obj.toString());
+        };
+    }
+
+    String patternSwitchClass(Object obj) {
+        return switch (obj) {
+            case Class<?> c when c == Integer.class -> "Int";
+            case Class<?> c -> "Class: " + c.getName();
             default -> throw new IllegalArgumentException(obj.toString());
         };
     }
@@ -128,7 +227,9 @@ public class Java21FeaturesExample {
             case String s when s.length() < 5 -> "short";
             case Integer i -> "int";
             case String s when s.length() > 3 && s.startsWith("a") -> "long-a";
-            case String s -> "long";
+            case String[] s -> "string list";
+            case String s -> s;
+            case int[] i -> "int list";
             default -> "not a string";
         }).trim();
     }
@@ -191,8 +292,7 @@ public class Java21FeaturesExample {
 
     int inMethod(Object obj) {
         return new Builder().build(1).build(switch (obj) {
-            case null -> -1;
-            case String s when s.length() > 5 -> s.length()-5;
+            case String s when s.length() > 5 -> s.length() - 5;
             case String s -> s.length();
             case Integer i -> i;
             default -> obj.hashCode();
@@ -201,13 +301,13 @@ public class Java21FeaturesExample {
 
     void switchInIf(Object obj) {
         if (switch (obj) {
-                case null -> -1;
-                case String s when s.length() > 5 -> s.length()-5;
-                case String s -> s.length();
-                case Integer i -> i;
-                default -> obj.hashCode();
+            case null -> -1;
+            case String s when s.length() > 5 -> s.length() - 5;
+            case String s -> s.length();
+            case Integer i -> i;
+            default -> obj.hashCode();
         } > 0) {
-             System.out.println("Working");
+            System.out.println("Working");
         }
     }
 
@@ -215,26 +315,33 @@ public class Java21FeaturesExample {
     void recordPatternInstanceof(Object obj) {
         if (obj instanceof Point(int x, int y)) {
             System.out.println(x + y);
+        } else if (obj instanceof Shape(String name, Triangle triangle) && name.equals("line")) {
+            System.out.println("A line cannot be a triangle!");
         }
     }
 
     void nestedRecordPattern(Object obj) {
         if (obj instanceof Shape(var name, Triangle(var p, Point(int bx, int by), Point(int cx, int cy)))) {
-            System.out.println("Shape " + name + " has triangle with vertices: " +
-                "(" + p.x() + "," + p.y() + "), (" + bx + "," + by + "), (" + cx + "," + cy + ")");
+            System.out.println("Shape " + name + ": " +
+                    "(" + p.x() + "," + p.y() + "), (" + bx + "," + by + "), (" + cx + "," + cy + ")");
         }
     }
 
     int recordPatternSwitchStatement(Geometry obj) {
         return switch (obj) {
-            case Point(int x, int y): yield x + y;
+            case Point(int x, int y) when x == 0 && y == 0: {
+                yield 0;
+            }
+            case Point(int x, int y):
+                yield x + y;
             case Triangle(Point p, Point(int bx, int by), Point(int cx, int cy)): {
                 int sum = p.x() * p.y();
                 sum += bx * by;
                 sum += cx * cy;
                 yield sum;
             }
-            case Shape s: yield 0;
+            case Shape s:
+                yield 0;
             // No default case since class is sealed.
         };
     }
@@ -253,4 +360,3 @@ public class Java21FeaturesExample {
         }
     }
 }
-
