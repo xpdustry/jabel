@@ -11,13 +11,13 @@ import com.sun.tools.javac.util.*;
  * Because implicit classes import the {@code java.base} module, and modules are not yet supported,
  * we need to convert it by adding star import of all exported and existing packages.
  */
-public class ImplicitClassesFixerTaskListener implements TaskListener{
+public class ImplicitClassesRetrofittingTaskListener implements TaskListener{
     final TreeMaker make;
     final Names names;
     final Symtab syms;
     List<JCImport> javaBaseImports;
 
-    ImplicitClassesFixerTaskListener(Context context){
+    ImplicitClassesRetrofittingTaskListener(Context context){
         make = TreeMaker.instance(context);
         names = Names.instance(context);
         syms = Symtab.instance(context);
