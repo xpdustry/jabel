@@ -7,6 +7,7 @@ import com.sun.source.util.*;
 import com.sun.tools.javac.api.*;
 import com.sun.tools.javac.code.*;
 import com.sun.tools.javac.comp.*;
+import com.sun.tools.javac.jvm.*;
 import com.sun.tools.javac.util.*;
 
 import sun.misc.*;
@@ -40,7 +41,7 @@ public class JabelCompilerPlugin implements Plugin{
         task.addTaskListener(new SwitchRetrofittingTaskListener(context));
         //task.addTaskListener(new SwitchRetrofittingTaskListener2(context));
         task.addTaskListener(new FlexibleMainRetrofittingTaskListener(context));
-        task.addTaskListener(new ImplicitClassesFixerTaskListener(context));
+        task.addTaskListener(new ImplicitClassesRetrofittingTaskListener(context));
     }
 
     @Override
@@ -84,7 +85,7 @@ public class JabelCompilerPlugin implements Plugin{
             // We can't always be lucky ¯\_(ツ)_/¯
             System.err.println("WARNING: Failed to open compiler packages!");
             System.err.println("WARNING: Please add the following arguments to the command:");
-            for (String p : new String[] {"api", "code", "comp", "tree", "util"}) {
+            for (String p : new String[] {"api", "code", "comp", "tree", "util", "jvm"}) {
                 System.err.println("WARNING:   --add-opens=jdk.compiler/com.sun.tools.javac." + p + "=ALL-UNNAMED");
             }
             throw new RuntimeException(th);
@@ -189,6 +190,13 @@ public class JabelCompilerPlugin implements Plugin{
                 unsafe.putObject(enter, unsafe.objectFieldOffset(previewField), Preview.instance(new Context()));
             }catch(Exception ignored){}
         }
+
+        // Disable preview for ClassWriter, to not write preview version to files
+        try{
+            Field previewField = ClassWriter.class.getDeclaredField("preview");
+            ClassWriter writer = ClassWriter.instance(context);
+            unsafe.putObject(writer, unsafe.objectFieldOffset(previewField), Preview.instance(new Context()));
+        }catch(Exception ignored){}
 
         return true;
     }

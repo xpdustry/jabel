@@ -52,7 +52,7 @@ repositories {
 }
 
 dependencies {
-    annotationProcessor "com.xpdustry:jabel:1.1.0"
+    annotationProcessor "com.xpdustry:jabel:1.1.1"
 }
 
 compileJava {
@@ -71,7 +71,7 @@ compileJava {
 Short version:
 ```gradle
 repositories { maven { url "https://maven.xpdustry.com/releases" } }
-dependencies.annotationProcessor "com.xpdustry:jabel:1.1.0"
+dependencies.annotationProcessor "com.xpdustry:jabel:1.1.1"
 compileJava.options.release = 8
 ```
 

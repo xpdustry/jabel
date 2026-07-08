@@ -25,4 +25,9 @@ task run(dependsOn: classes, type: JavaExec){
     classpath = sourceSets.main.runtimeClasspath
     standardInput = System.in
     workingDir = buildDir
+    
+    // Force using jre8 to be sure
+    javaLauncher = javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
 }
